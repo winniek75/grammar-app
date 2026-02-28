@@ -250,12 +250,10 @@ export default function TeacherRoomPage() {
                 )}
 
                 <ExplanationPanel
+                  question={currentQuestion}
                   showAnswer={room.showAnswer}
                   showExplanation={room.showExplanation}
-                  correctAnswer={currentQuestion.correctAnswer}
-                  explanation={currentQuestion.explanation}
-                  explanationShort={currentQuestion.explanationShort}
-                  onToggle={handleToggleAnswer}
+                  mode={room.mode}
                 />
               </div>
             ) : (
