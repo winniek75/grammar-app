@@ -2,38 +2,23 @@
 
 import { useEffect, useState } from 'react'
 
-interface StudentAnswer {
-  participantId: string
-  participantName: string
-  answerText: string
-  isCorrect: boolean
-  answeredAt: string
-}
-
-interface Participant {
-  id: string
-  name: string
-}
+import type { Participant, Answer } from '@/types'
 
 interface StudentAnswersProps {
   participants: Participant[]
-  answers: StudentAnswer[]
-  currentQuestionId: string | null
+  answers: Answer[]
   showAnswer: boolean
 }
 
 export default function StudentAnswers({
   participants,
   answers,
-  currentQuestionId,
   showAnswer,
 }: StudentAnswersProps) {
   const [animatedIds, setAnimatedIds] = useState<Set<string>>(new Set())
 
-  // 現在の問題に対する回答のみ
-  const currentAnswers = answers.filter(
-    (a) => currentQuestionId // answersは既にフィルタ済みを想定
-  )
+  // answersは既にフィルタ済み
+  const currentAnswers = answers
 
   // 回答済みの参加者ID
   const answeredIds = new Set(currentAnswers.map((a) => a.participantId))
@@ -91,7 +76,7 @@ export default function StudentAnswers({
               <span className="text-xs text-slate-400">
                 参加者 {totalParticipants}人
               </span>
-              {currentQuestionId && (
+              {totalAnswered > 0 && (
                 <>
                   <span className="text-slate-300">·</span>
                   <span className="text-xs text-slate-400">
@@ -120,7 +105,7 @@ export default function StudentAnswers({
       </div>
 
       {/* 回答プログレスバー */}
-      {currentQuestionId && totalParticipants > 0 && (
+      {totalParticipants > 0 && (
         <div className="px-5 pt-3">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
@@ -227,11 +212,7 @@ export default function StudentAnswers({
                   </div>
 
                   {/* 回答状態 */}
-                  {!currentQuestionId ? (
-                    <span className="text-[10px] text-slate-300 font-medium">
-                      待機中
-                    </span>
-                  ) : !hasAnswered ? (
+                  {!hasAnswered ? (
                     <span className="flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                       <span className="text-[10px] text-amber-500 font-medium">
