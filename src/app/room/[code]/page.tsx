@@ -1,304 +1,162 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
-import { useStudentPusher } from '@/hooks/usePusher'
-import { questions } from '@/data/questions'
-import type {
-  Question,
-  QuestionChangeEvent,
-  ShowAnswerEvent,
-} from '@/types'
+import { useParams } from 'next/navigation'
+import { usePusher } from '@/hooks/usePusher'
+import ChoiceQuestion from '@/components/questions/ChoiceQuestion'
+import TypingQuestion from '@/components/questions/TypingQuestion'
+import SortingQuestion from '@/components/questions/SortingQuestion'
+import { Question, QuestionType } from '@/types'
+import { questions as allQuestions } from '@/data/questions'
 
-// ─────────────────────────────────────────────
-// 型
-// ─────────────────────────────────────────────
+type Phase = 'enter-name' | 'waiting' | 'question' | 'finished'
 
-type AppState =
-  | { phase: 'lookup' }                         // コード入力
-  | { phase: 'join'; roomId: string }            // 名前入力
-  | { phase: 'waiting'; roomId: string; participantId: string; name: string }
-  | { phase: 'question'; roomId: string; participantId: string; name: string; question: Question; mode: 'choice' | 'typing' | 'sorting'; showAnswer: boolean; showExplanation: boolean; myAnswer: string | null; isCorrect: boolean | null }
-  | { phase: 'finished' }
+export default function StudentRoomPage() {
+  const { code } = useParams<{ code: string }>()
 
-// ─────────────────────────────────────────────
-// 問題コンポーネント
-// ─────────────────────────────────────────────
-
-function ChoiceQuestion({
-  question,
-  onAnswer,
-  myAnswer,
-  showAnswer,
-}: {
-  question: Question
-  onAnswer: (id: string) => void
-  myAnswer: string | null
-  showAnswer: boolean
-}) {
-  return (
-    <div className="space-y-3">
-      {question.choices?.map((c) => {
-        const isSelected = myAnswer === c.id
-        const isCorrect = c.id === question.correctAnswer
-        let cls = 'w-full text-left px-5 py-4 rounded-xl border-2 font-medium transition '
-        if (myAnswer !== null) {
-          if (showAnswer) {
-            cls += isCorrect
-              ? 'border-emerald-500 bg-emerald-900/40 text-emerald-200'
-              : isSelected
-              ? 'border-red-500 bg-red-900/40 text-red-200'
-              : 'border-slate-600 text-slate-400'
-          } else {
-            cls += isSelected
-              ? 'border-blue-500 bg-blue-900/40 text-blue-200'
-              : 'border-slate-600 text-slate-400'
-          }
-        } else {
-          cls += 'border-slate-600 bg-slate-700 text-white hover:border-blue-500 hover:bg-slate-600'
-        }
-
-        return (
-          <button key={c.id} onClick={() => myAnswer === null && onAnswer(c.id)} className={cls}>
-            <span className="font-bold text-emerald-400 mr-3">({c.id})</span>
-            {c.text}
-            {showAnswer && isCorrect && <span className="ml-2">✅</span>}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function TypingQuestion({
-  question,
-  onAnswer,
-  myAnswer,
-  showAnswer,
-}: {
-  question: Question
-  onAnswer: (text: string) => void
-  myAnswer: string | null
-  showAnswer: boolean
-}) {
-  const [input, setInput] = useState('')
-
-  return (
-    <div className="space-y-4">
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && input.trim() && myAnswer === null && onAnswer(input.trim())}
-        disabled={myAnswer !== null}
-        placeholder="回答を入力してEnter..."
-        className="w-full bg-slate-700 border-2 border-slate-600 text-white rounded-xl px-5 py-4 text-lg focus:outline-none focus:border-blue-500 disabled:opacity-60"
-      />
-      {myAnswer === null && (
-        <button
-          onClick={() => input.trim() && onAnswer(input.trim())}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition"
-        >
-          回答する
-        </button>
-      )}
-      {myAnswer !== null && showAnswer && (
-        <div className="bg-slate-700 rounded-xl px-5 py-4">
-          <p className="text-xs text-emerald-400 mb-1">正答</p>
-          <p className="text-lg font-bold text-emerald-300">{question.correctAnswer}</p>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SortingQuestion({
-  question,
-  onAnswer,
-  myAnswer,
-}: {
-  question: Question
-  onAnswer: (text: string) => void
-  myAnswer: string | null
-}) {
-  const [arranged, setArranged] = useState<string[]>([])
-  const [remaining, setRemaining] = useState<string[]>([...(question.sortWords ?? [])])
-
-  const addWord = (word: string, idx: number) => {
-    if (myAnswer !== null) return
-    setArranged((prev) => [...prev, word])
-    setRemaining((prev) => prev.filter((_, i) => i !== idx))
-  }
-
-  const removeWord = (idx: number) => {
-    if (myAnswer !== null) return
-    const word = arranged[idx]
-    setArranged((prev) => prev.filter((_, i) => i !== idx))
-    setRemaining((prev) => [...prev, word])
-  }
-
-  const handleSubmit = () => {
-    if (arranged.length === 0) return
-    onAnswer(arranged.join(' '))
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* 並べた単語 */}
-      <div className="min-h-14 bg-slate-700 border-2 border-slate-600 rounded-xl p-3 flex flex-wrap gap-2">
-        {arranged.length === 0 && (
-          <span className="text-slate-500 text-sm self-center">下の単語をタップして並べてください</span>
-        )}
-        {arranged.map((w, i) => (
-          <button
-            key={i}
-            onClick={() => removeWord(i)}
-            className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 transition"
-          >
-            {w}
-          </button>
-        ))}
-      </div>
-
-      {/* 残り単語 */}
-      <div className="flex flex-wrap gap-2">
-        {remaining.map((w, i) => (
-          <button
-            key={i}
-            onClick={() => addWord(w, i)}
-            className="bg-slate-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-slate-500 transition"
-          >
-            {w}
-          </button>
-        ))}
-      </div>
-
-      {myAnswer === null && arranged.length > 0 && (
-        <button
-          onClick={handleSubmit}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition"
-        >
-          回答する
-        </button>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────
-// メインコンポーネント
-// ─────────────────────────────────────────────
-
-export default function StudentRoomPage({ params }: { params: { code: string } }) {
-  const router = useRouter()
-  const [state, setState] = useState<AppState>({ phase: 'lookup' })
+  const [phase, setPhase] = useState<Phase>('enter-name')
   const [nameInput, setNameInput] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [notification, setNotification] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [joining, setJoining] = useState(false)
 
-  // URL のコードを初期値に
-  useEffect(() => {
-    if (params.code && params.code !== 'enter') {
-      setState({ phase: 'join', roomId: '' })
-      // コードからルームを検索
-      setLoading(true)
-      fetch(`/api/rooms/code/${params.code}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.error) {
-            setError(data.error)
-            setState({ phase: 'lookup' })
-          } else {
-            setState({ phase: 'join', roomId: data.roomId })
-          }
-        })
-        .catch(() => setError('ルームの検索に失敗しました'))
-        .finally(() => setLoading(false))
-    }
-  }, [params.code])
+  const [roomId, setRoomId] = useState<string | null>(null)
+  const [participantId, setParticipantId] = useState<string | null>(null)
 
-  // 通知表示
-  const showNotification = (msg: string) => {
-    setNotification(msg)
-    setTimeout(() => setNotification(null), 3000)
-  }
+  const [mode, setMode] = useState<QuestionType>('choice')
+  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
+  const [showAnswer, setShowAnswer] = useState(false)
+  const [showExplanation, setShowExplanation] = useState(false)
+  const [correctAnswer, setCorrectAnswer] = useState<string | null>(null)
+  const [explanation, setExplanation] = useState('')
+  const [explanationShort, setExplanationShort] = useState('')
 
-  // ── Pusher: 講師→生徒イベント受信 ──────────
-  const roomId = state.phase !== 'lookup' && state.phase !== 'finished'
-    ? (state as { roomId: string }).roomId
-    : null
+  // Answer state
+  const [selectedChoice, setSelectedChoice] = useState<string | null>(null)
+  const [typingValue, setTypingValue] = useState('')
+  const [answerSubmitted, setAnswerSubmitted] = useState(false)
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
 
-  useStudentPusher({
-    roomId,
-    onQuestionChange: useCallback((data: QuestionChangeEvent) => {
-      setState((prev) => {
-        if (prev.phase === 'lookup' || prev.phase === 'finished') return prev
-        const question = questions.find((q) => q.id === data.questionId)
-        if (!question) return prev
-        const base = prev as { roomId: string; participantId: string; name: string }
-        return {
-          phase: 'question',
-          roomId: base.roomId,
-          participantId: base.participantId,
-          name: base.name,
-          question,
-          mode: data.mode,
-          showAnswer: data.showAnswer,
-          showExplanation: data.showExplanation,
-          myAnswer: null,
-          isCorrect: null,
-        }
-      })
-      showNotification('📝 新しい問題が届きました！')
-    }, []),
+  // Hint
+  const [showHint, setShowHint] = useState(false)
 
-    onShowAnswer: useCallback((data: ShowAnswerEvent) => {
-      setState((prev) => {
-        if (prev.phase !== 'question') return prev
-        return { ...prev, showAnswer: data.showAnswer, showExplanation: data.showExplanation }
-      })
-      if (data.showAnswer) showNotification('✅ 正答が発表されました！')
-    }, []),
-
-    onRoomFinished: useCallback(() => {
-      setState({ phase: 'finished' })
-    }, []),
-  })
-
-  // ── 名前入力 → 入室 ──────────────────────────
-  const handleJoin = async () => {
-    if (state.phase !== 'join') return
+  // Join room
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault()
     const name = nameInput.trim()
-    if (!name) return setError('名前を入力してください')
+    if (!name) {
+      setError('名前を入力してください')
+      return
+    }
+    setJoining(true)
+    setError('')
 
-    setLoading(true)
-    setError(null)
     try {
-      const res = await fetch(`/api/rooms/${state.roomId}/join`, {
+      // Find room by code
+      const roomRes = await fetch(`/api/rooms/code/${code.toUpperCase()}`)
+      if (!roomRes.ok) {
+        setError('ルームが見つかりません。コードを確認してください。')
+        setJoining(false)
+        return
+      }
+      const roomData = await roomRes.json()
+
+      // Join
+      const joinRes = await fetch(`/api/rooms/${roomData.id}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       })
-      const data = await res.json()
-      if (!res.ok) return setError(data.error)
-      setState({
-        phase: 'waiting',
-        roomId: state.roomId,
-        participantId: data.participantId,
-        name,
-      })
+      if (!joinRes.ok) {
+        setError('入室に失敗しました。')
+        setJoining(false)
+        return
+      }
+      const joinData = await joinRes.json()
+
+      setRoomId(roomData.id)
+      setParticipantId(joinData.participantId)
+      setMode(joinData.mode)
+
+      if (joinData.status === 'finished') {
+        setPhase('finished')
+        return
+      }
+
+      if (joinData.currentQuestionId) {
+        const q = allQuestions.find(q => q.id === joinData.currentQuestionId)
+        if (q) {
+          setCurrentQuestion(q)
+          setPhase('question')
+        } else {
+          setPhase('waiting')
+        }
+      } else {
+        setPhase('waiting')
+      }
     } catch {
-      setError('入室に失敗しました')
+      setError('ネットワークエラーが発生しました。')
     } finally {
-      setLoading(false)
+      setJoining(false)
     }
   }
 
-  // ── 回答送信 ──────────────────────────────────
-  const handleAnswer = async (answerText: string) => {
-    if (state.phase !== 'question') return
-    const { roomId, participantId, name, question } = state
+  // Reset answer state when question changes
+  function resetAnswer() {
+    setSelectedChoice(null)
+    setTypingValue('')
+    setAnswerSubmitted(false)
+    setIsCorrect(null)
+    setShowHint(false)
+    setShowAnswer(false)
+    setShowExplanation(false)
+    setCorrectAnswer(null)
+    setExplanation('')
+    setExplanationShort('')
+  }
+
+  // Pusher events
+  const handleQuestionChange = useCallback((data: unknown) => {
+    const payload = data as { questionId: string; mode: QuestionType }
+    const q = allQuestions.find(q => q.id === payload.questionId)
+    if (q) {
+      resetAnswer()
+      setCurrentQuestion(q)
+      setMode(payload.mode)
+      setPhase('question')
+    }
+  }, [])
+
+  const handleShowAnswer = useCallback((data: unknown) => {
+    const payload = data as {
+      showAnswer: boolean
+      showExplanation: boolean
+      correctAnswer: string
+      explanation: string
+      explanationShort: string
+    }
+    setShowAnswer(payload.showAnswer)
+    setShowExplanation(payload.showExplanation)
+    if (payload.showAnswer) {
+      setCorrectAnswer(payload.correctAnswer)
+      setExplanation(payload.explanation)
+      setExplanationShort(payload.explanationShort)
+    }
+  }, [])
+
+  const handleRoomFinished = useCallback(() => {
+    setPhase('finished')
+  }, [])
+
+  usePusher(roomId ? `room-${roomId}` : null, {
+    'question-change': handleQuestionChange,
+    'show-answer': handleShowAnswer,
+    'room-finished': handleRoomFinished,
+  })
+
+  // Submit answer
+  async function submitAnswer(answerText: string) {
+    if (!roomId || !participantId || !currentQuestion || answerSubmitted) return
+    setAnswerSubmitted(true)
 
     try {
       const res = await fetch(`/api/rooms/${roomId}/answer`, {
@@ -306,213 +164,203 @@ export default function StudentRoomPage({ params }: { params: { code: string } }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           participantId,
-          participantName: name,
-          questionId: question.id,
+          questionId: currentQuestion.id,
           answerText,
         }),
       })
       const data = await res.json()
-      if (!res.ok) return showNotification('回答の送信に失敗しました')
-      setState((prev) =>
-        prev.phase === 'question'
-          ? { ...prev, myAnswer: answerText, isCorrect: data.isCorrect }
-          : prev
-      )
+      if (res.ok) {
+        setIsCorrect(data.isCorrect)
+      }
     } catch {
-      showNotification('回答の送信に失敗しました')
+      setAnswerSubmitted(false)
     }
   }
 
-  // ── レンダリング ────────────────────────────
+  function handleChoiceSelect(id: string) {
+    if (answerSubmitted) return
+    setSelectedChoice(id)
+    submitAnswer(id)
+  }
+
+  function handleTypingSubmit() {
+    if (!typingValue.trim() || answerSubmitted) return
+    submitAnswer(typingValue.trim())
+  }
+
+  function handleSortingSubmit(answer: string) {
+    submitAnswer(answer)
+  }
+
+  // ── Render ──
+
+  if (phase === 'enter-name') {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-green-50 to-teal-100">
+        <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm">
+          <h1 className="text-2xl font-bold text-center text-teal-700 mb-1">入室</h1>
+          <p className="text-center text-gray-500 text-sm mb-6">
+            ルームコード: <span className="font-bold text-gray-700">{code?.toUpperCase()}</span>
+          </p>
+          <form onSubmit={handleJoin} className="space-y-4">
+            <input
+              type="text"
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              placeholder="あなたの名前を入力"
+              maxLength={20}
+              className="w-full border-2 border-gray-200 focus:border-teal-400 rounded-xl px-4 py-3 text-center text-lg outline-none transition"
+              autoFocus
+            />
+            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+            <button
+              type="submit"
+              disabled={joining}
+              className="w-full bg-teal-500 hover:bg-teal-600 disabled:bg-teal-300 text-white font-semibold py-3 rounded-xl transition"
+            >
+              {joining ? '接続中...' : '入室する'}
+            </button>
+          </form>
+        </div>
+      </main>
+    )
+  }
+
+  if (phase === 'waiting') {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-green-50 to-teal-100">
+        <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm text-center">
+          <div className="text-4xl mb-4 animate-bounce">⏳</div>
+          <h2 className="text-xl font-bold text-gray-700 mb-2">講師を待っています...</h2>
+          <p className="text-gray-500 text-sm">問題が出たら自動的に表示されます</p>
+          <p className="text-teal-600 font-medium mt-4">{nameInput} さんとして入室済み</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (phase === 'finished') {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-green-50 to-teal-100">
+        <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm text-center">
+          <div className="text-5xl mb-4">🎉</div>
+          <h2 className="text-2xl font-bold text-gray-700 mb-2">授業終了</h2>
+          <p className="text-gray-500">お疲れ様でした！</p>
+        </div>
+      </main>
+    )
+  }
+
+  // Phase: question
+  if (!currentQuestion) return null
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      {/* 通知バナー */}
-      {notification && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-6 py-3 rounded-full shadow-lg text-sm font-medium animate-bounce">
-          {notification}
+    <main className="min-h-screen bg-gradient-to-br from-green-50 to-teal-100 p-4">
+      <div className="max-w-2xl mx-auto space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-teal-700 font-medium">
+            {nameInput} さん
+          </div>
+          <div className="flex gap-2 text-xs">
+            <span className="bg-teal-100 text-teal-700 px-2 py-1 rounded-full">
+              {currentQuestion.category}
+            </span>
+            <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
+              中{currentQuestion.grade}
+            </span>
+            <span className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full capitalize">
+              {mode === 'choice' ? '選択' : mode === 'typing' ? '記述' : '並べ替え'}
+            </span>
+          </div>
         </div>
-      )}
 
-      <div className="max-w-lg mx-auto px-4 py-8">
-        {/* ── コード入力 / 名前入力 ── */}
-        {(state.phase === 'lookup' || state.phase === 'join') && (
-          <div className="space-y-6">
-            <div className="text-center">
-              <h1 className="text-3xl font-bold text-emerald-400">🇬🇧 英文法レッスン</h1>
-              <p className="text-slate-400 mt-2">講師からコードをもらって入室してください</p>
-            </div>
+        {/* Question card */}
+        <div className="bg-white rounded-2xl shadow-md p-6">
+          <p className="text-xl font-bold text-gray-800 mb-6 leading-relaxed">
+            {currentQuestion.questionText}
+          </p>
 
-            {state.phase === 'lookup' ? (
-              <div className="space-y-4">
-                <p className="text-slate-300">入室コードを入力してください</p>
-                <input
-                  type="text"
-                  maxLength={6}
-                  className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl px-5 py-4 text-center text-2xl font-mono tracking-widest uppercase focus:outline-none focus:border-emerald-500"
-                  placeholder="XXXXXX"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const val = (e.target as HTMLInputElement).value.trim()
-                      if (val.length === 6) {
-                        router.push(`/room/${val}`)
-                      }
-                    }
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="bg-slate-800 rounded-2xl p-6 space-y-4">
-                <p className="text-slate-300">あなたの名前を入力してください</p>
-                <input
-                  type="text"
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-                  placeholder="例: 田中花子"
-                  maxLength={20}
-                  className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl px-5 py-4 text-lg focus:outline-none focus:border-emerald-500"
-                />
-                {error && <p className="text-red-400 text-sm">{error}</p>}
-                <button
-                  onClick={handleJoin}
-                  disabled={loading}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-4 rounded-xl text-lg font-bold transition"
-                >
-                  {loading ? '入室中...' : '入室する'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+          {/* Answer UI */}
+          {mode === 'choice' && currentQuestion.choices && (
+            <ChoiceQuestion
+              choices={currentQuestion.choices}
+              selected={selectedChoice}
+              correct={showAnswer ? correctAnswer : null}
+              disabled={answerSubmitted}
+              onSelect={handleChoiceSelect}
+            />
+          )}
 
-        {/* ── 待機中 ── */}
-        {state.phase === 'waiting' && (
-          <div className="text-center space-y-6 py-16">
-            <div className="text-6xl">⏳</div>
-            <div>
-              <p className="text-2xl font-bold text-white">{state.name}さん、入室しました！</p>
-              <p className="text-slate-400 mt-2">講師が問題を送るまでお待ちください...</p>
-            </div>
-            <div className="flex justify-center gap-2">
-              {[0, 0.2, 0.4].map((d, i) => (
-                <div
-                  key={i}
-                  className="w-3 h-3 bg-emerald-500 rounded-full animate-bounce"
-                  style={{ animationDelay: `${d}s` }}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+          {mode === 'typing' && (
+            <TypingQuestion
+              value={typingValue}
+              correct={showAnswer ? correctAnswer : null}
+              submitted={answerSubmitted}
+              isCorrect={isCorrect}
+              onChange={setTypingValue}
+              onSubmit={handleTypingSubmit}
+            />
+          )}
 
-        {/* ── 問題表示 ── */}
-        {state.phase === 'question' && (
-          <div className="space-y-5">
-            {/* ヘッダー */}
-            <div className="flex items-center justify-between">
-              <div className="flex gap-2">
-                <span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded">
-                  中{state.question.grade} / {state.question.category}
-                </span>
-                <span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded">
-                  {state.mode === 'choice' ? '選択' : state.mode === 'typing' ? 'タイピング' : '並べ替え'}
-                </span>
-              </div>
-              <span className="text-sm text-slate-400">{state.name}</span>
-            </div>
+          {mode === 'sorting' && currentQuestion.sortWords && (
+            <SortingQuestion
+              words={currentQuestion.sortWords}
+              correct={showAnswer ? correctAnswer : null}
+              submitted={answerSubmitted}
+              isCorrect={isCorrect}
+              onSubmit={handleSortingSubmit}
+            />
+          )}
 
-            {/* 問題文 */}
-            <div className="bg-slate-800 rounded-2xl p-6">
-              <p className="text-xl font-medium leading-relaxed">{state.question.questionText}</p>
-            </div>
-
-            {/* 回答フォーム */}
-            {state.mode === 'choice' && (
-              <ChoiceQuestion
-                question={state.question}
-                onAnswer={handleAnswer}
-                myAnswer={state.myAnswer}
-                showAnswer={state.showAnswer}
-              />
-            )}
-            {state.mode === 'typing' && (
-              <TypingQuestion
-                question={state.question}
-                onAnswer={handleAnswer}
-                myAnswer={state.myAnswer}
-                showAnswer={state.showAnswer}
-              />
-            )}
-            {state.mode === 'sorting' && (
-              <SortingQuestion
-                question={state.question}
-                onAnswer={handleAnswer}
-                myAnswer={state.myAnswer}
-              />
-            )}
-
-            {/* 回答後フィードバック */}
-            {state.myAnswer !== null && (
-              <div
-                className={`rounded-2xl p-5 text-center border-2 ${
-                  state.isCorrect
-                    ? 'bg-emerald-900/40 border-emerald-600'
-                    : 'bg-red-900/40 border-red-600'
-                }`}
-              >
-                <p className="text-4xl mb-2">{state.isCorrect ? '🎉' : '😢'}</p>
-                <p className="text-xl font-bold">
-                  {state.isCorrect ? '正解！' : '不正解...'}
-                </p>
-                {!state.showAnswer && (
-                  <p className="text-sm text-slate-400 mt-1">正答発表をお待ちください</p>
-                )}
-              </div>
-            )}
-
-            {/* 正答・解説（showAnswer時） */}
-            {state.showAnswer && state.myAnswer !== null && (
-              <div className="bg-slate-800 rounded-2xl p-5 space-y-3">
-                <div>
-                  <p className="text-xs text-emerald-400 font-semibold mb-1">✅ 正答</p>
-                  <p className="text-lg font-bold text-emerald-300">
-                    {state.question.correctAnswer}
-                  </p>
-                </div>
-                {state.showExplanation && (
-                  <div>
-                    <p className="text-xs text-blue-400 font-semibold mb-1">📖 解説</p>
-                    <p className="text-sm text-slate-200 leading-relaxed">
-                      {state.question.explanation}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-400">
-                      💡 {state.question.explanationShort}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── 終了 ── */}
-        {state.phase === 'finished' && (
-          <div className="text-center space-y-6 py-16">
-            <div className="text-6xl">🏁</div>
-            <div>
-              <p className="text-2xl font-bold">授業終了！</p>
-              <p className="text-slate-400 mt-2">お疲れ様でした。また次回もがんばりましょう！</p>
-            </div>
-            <button
-              onClick={() => router.push('/')}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-xl font-medium transition"
+          {/* Result feedback (after answer submitted, before answer shown) */}
+          {answerSubmitted && isCorrect !== null && !showAnswer && mode === 'choice' && (
+            <div
+              className={`mt-4 rounded-xl px-4 py-3 text-sm font-medium ${
+                isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+              }`}
             >
-              トップに戻る
+              {isCorrect ? '✅ 正解！ 正答発表を待ちましょう' : '❌ 不正解 正答発表を待ちましょう'}
+            </div>
+          )}
+
+          {/* Waiting for other students */}
+          {answerSubmitted && !showAnswer && (
+            <p className="mt-4 text-center text-sm text-gray-400 animate-pulse">
+              他の生徒の回答を待っています...
+            </p>
+          )}
+
+          {/* Explanation (when shown by teacher) */}
+          {showAnswer && showExplanation && explanation && (
+            <div className="mt-5 bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <p className="text-xs font-bold text-blue-700 mb-1">📖 解説</p>
+              <p className="text-sm text-blue-900 mb-2">{explanation}</p>
+              {explanationShort && (
+                <p className="text-xs text-blue-600 bg-blue-100 rounded px-2 py-1">
+                  💡 {explanationShort}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Hint */}
+        <div className="text-center">
+          {!showHint ? (
+            <button
+              onClick={() => setShowHint(true)}
+              className="text-sm text-gray-400 hover:text-teal-600 underline transition"
+            >
+              ヒントを見る
             </button>
-          </div>
-        )}
+          ) : (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-sm text-yellow-800">
+              💡 {currentQuestion.hint}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </main>
   )
 }

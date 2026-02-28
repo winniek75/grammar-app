@@ -1,77 +1,61 @@
-import { NextResponse } from 'next/server'
-import { getRoom, addAnswer } from '@/lib/room-store'
-import { generateAnswerId, checkAnswer } from '@/lib/utils'
-import { triggerRoomEvent } from '@/lib/pusher'
+import { NextRequest, NextResponse } from 'next/server'
+import { getRoom, setRoom } from '@/lib/room-store'
+import { pusherServer } from '@/lib/pusher'
+import { checkAnswer, generateId } from '@/lib/utils'
 import { questions } from '@/data/questions'
-import type { Answer, AnswerSubmittedEvent } from '@/types'
-
-export const runtime = 'nodejs'
+import { Answer } from '@/types'
 
 export async function POST(
-  req: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const room = getRoom(params.id)
   if (!room) {
-    return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
-  }
-  if (room.status === 'finished') {
-    return NextResponse.json({ error: 'このルームは終了しています' }, { status: 410 })
+    return NextResponse.json({ error: 'Room not found' }, { status: 404 })
   }
 
-  let body: {
-    participantId?: string
-    participantName?: string
-    questionId?: string
-    answerText?: string
-  }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'リクエストが不正です' }, { status: 400 })
+  const { participantId, questionId, answerText } = await request.json()
+
+  const participant = room.participants.find(p => p.id === participantId)
+  if (!participant) {
+    return NextResponse.json({ error: 'Participant not found' }, { status: 404 })
   }
 
-  const { participantId, participantName, questionId, answerText } = body
-  if (!participantId || !participantName || !questionId || answerText === undefined) {
-    return NextResponse.json({ error: '必須フィールドが不足しています' }, { status: 400 })
-  }
-
-  if (room.currentQuestionId && room.currentQuestionId !== questionId) {
-    return NextResponse.json({ error: '現在の問題への回答ではありません' }, { status: 400 })
-  }
-
-  const question = questions.find((q) => q.id === questionId)
+  const question = questions.find(q => q.id === questionId)
   if (!question) {
-    return NextResponse.json({ error: '問題が見つかりません' }, { status: 404 })
+    return NextResponse.json({ error: 'Question not found' }, { status: 404 })
   }
 
-  const isCorrect = checkAnswer(question, answerText)
-  const now = new Date()
+  // Check if already answered this question
+  const existingAnswer = room.answers.find(
+    a => a.participantId === participantId && a.questionId === questionId
+  )
+  if (existingAnswer) {
+    return NextResponse.json({ error: 'Already answered' }, { status: 409 })
+  }
+
+  const isCorrect = checkAnswer(answerText, question.correctAnswer, room.mode)
 
   const answer: Answer = {
-    id: generateAnswerId(),
+    id: generateId(),
     questionId,
     participantId,
-    participantName,
+    participantName: participant.name,
     answerText,
     isCorrect,
-    answeredAt: now,
+    answeredAt: new Date(),
   }
 
-  const updated = addAnswer(params.id, answer)
-  if (!updated) {
-    return NextResponse.json({ error: '回答の保存に失敗しました' }, { status: 500 })
-  }
+  room.answers.push(answer)
+  setRoom(room)
 
-  const event: AnswerSubmittedEvent = {
+  await pusherServer.trigger(`room-${room.id}`, 'answer-submitted', {
     participantId,
-    participantName,
+    participantName: participant.name,
     questionId,
     answerText,
     isCorrect,
-    answeredAt: now.toISOString(),
-  }
-  await triggerRoomEvent(params.id, 'answer-submitted', event)
+  })
 
-  return NextResponse.json({ isCorrect, answeredAt: now.toISOString() }, { status: 201 })
+  return NextResponse.json({ isCorrect })
 }

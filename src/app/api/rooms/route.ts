@@ -1,18 +1,16 @@
 import { NextResponse } from 'next/server'
-import { createRoom } from '@/lib/room-store'
-import { generateRoomId, generateAdminKey, generateRoomCode } from '@/lib/utils'
-import type { RoomState, CreateRoomResponse } from '@/types'
-
-export const runtime = 'nodejs'
+import { generateAdminKey, generateId, generateRoomCode } from '@/lib/utils'
+import { setRoom } from '@/lib/room-store'
+import { RoomState } from '@/types'
 
 export async function POST() {
-  const roomId = generateRoomId()
+  const id = generateId()
+  const code = generateRoomCode()
   const adminKey = generateAdminKey()
-  const roomCode = generateRoomCode()
 
   const room: RoomState = {
-    id: roomId,
-    code: roomCode,
+    id,
+    code,
     adminKey,
     mode: 'choice',
     currentQuestionId: null,
@@ -24,18 +22,13 @@ export async function POST() {
     createdAt: new Date(),
   }
 
-  createRoom(room)
+  setRoom(room)
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? ''
-  const teacherUrl = `${baseUrl}/teacher/room/${roomId}?key=${adminKey}`
-
-  const response: CreateRoomResponse = {
-    roomId,
-    roomCode,
+  return NextResponse.json({
+    id,
+    code,
     adminKey,
-    teacherUrl,
-    studentCode: roomCode,
-  }
-
-  return NextResponse.json(response, { status: 201 })
+    teacherUrl: `/teacher/room/${id}?key=${adminKey}`,
+    studentUrl: `/room/${code}`,
+  })
 }

@@ -3,151 +3,105 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-export default function TopPage() {
+export default function HomePage() {
   const router = useRouter()
-  const [studentCode, setStudentCode] = useState('')
+  const [creating, setCreating] = useState(false)
   const [createdRoom, setCreatedRoom] = useState<{
+    code: string
     teacherUrl: string
-    studentCode: string
   } | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState<string | null>(null)
+  const [studentCode, setStudentCode] = useState('')
+  const [error, setError] = useState('')
 
-  const handleCreateRoom = async () => {
-    setLoading(true)
-    setError(null)
+  async function handleCreateRoom() {
+    setCreating(true)
+    setError('')
     try {
       const res = await fetch('/api/rooms', { method: 'POST' })
       const data = await res.json()
-      if (!res.ok) return setError(data.error)
-      setCreatedRoom({
-        teacherUrl: data.teacherUrl || `/teacher/room/${data.roomId}?key=${data.adminKey}`,
-        studentCode: data.studentCode,
-      })
+      setCreatedRoom({ code: data.code, teacherUrl: data.teacherUrl })
     } catch {
       setError('ルームの作成に失敗しました')
     } finally {
-      setLoading(false)
+      setCreating(false)
     }
   }
 
-  const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text)
-    setCopied(key)
-    setTimeout(() => setCopied(null), 2000)
-  }
-
-  const handleStudentEnter = () => {
+  function handleStudentJoin(e: React.FormEvent) {
+    e.preventDefault()
     const code = studentCode.trim().toUpperCase()
-    if (code.length !== 6) return setError('6桁のコードを入力してください')
+    if (code.length < 4) {
+      setError('ルームコードを入力してください')
+      return
+    }
     router.push(`/room/${code}`)
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      <div className="max-w-2xl mx-auto px-4 py-12">
-        {/* タイトル */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-emerald-400">🇬🇧 英文法 総復習</h1>
-          <p className="text-slate-400 mt-3">
-            リアルタイム英文法演習アプリ
-          </p>
-        </div>
+    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-br from-blue-50 to-indigo-100">
+      <h1 className="text-3xl font-bold text-indigo-800 mb-2">中学英文法 総復習</h1>
+      <p className="text-gray-500 mb-10">オンラインレッスン用リアルタイム問題演習</p>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* 講師カード */}
-          <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-            <h2 className="text-xl font-bold mb-1">👩‍🏫 講師の方へ</h2>
-            <p className="text-slate-400 text-sm mb-5">ルームを作成して授業を始めましょう</p>
-
-            {!createdRoom ? (
-              <>
-                <button
-                  onClick={handleCreateRoom}
-                  disabled={loading}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-lg transition"
-                >
-                  {loading ? '作成中...' : 'ルームを作成する'}
-                </button>
-                {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
-              </>
-            ) : (
-              <div className="space-y-4">
-                <div className="bg-slate-700 rounded-xl p-4">
-                  <p className="text-xs text-slate-400 mb-1">📋 講師URL（自分用・コピーして保存）</p>
-                  <p className="font-mono text-xs text-white break-all leading-relaxed">
-                    {window.location.origin}{createdRoom.teacherUrl}
-                  </p>
-                  <button
-                    onClick={() => copyToClipboard(`${window.location.origin}${createdRoom.teacherUrl}`, 'teacher')}
-                    className="mt-2 text-xs bg-slate-600 hover:bg-slate-500 px-3 py-1 rounded transition"
-                  >
-                    {copied === 'teacher' ? '✅ コピーしました' : 'コピー'}
-                  </button>
-                </div>
-
-                <div className="bg-emerald-900/40 border border-emerald-600 rounded-xl p-4 text-center">
-                  <p className="text-xs text-emerald-400 mb-1">👥 生徒の入室コード</p>
-                  <p className="text-4xl font-mono font-bold tracking-widest text-emerald-300">
-                    {createdRoom.studentCode}
-                  </p>
-                  <button
-                    onClick={() => copyToClipboard(createdRoom.studentCode, 'code')}
-                    className="mt-2 text-xs bg-emerald-700 hover:bg-emerald-600 px-3 py-1 rounded transition"
-                  >
-                    {copied === 'code' ? '✅ コピーしました' : 'コードをコピー'}
-                  </button>
-                </div>
-
-                <a
-                  href={createdRoom.teacherUrl}
-                  className="block w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold text-center transition"
-                >
-                  🎓 講師パネルへ
-                </a>
-
-                <button
-                  onClick={() => setCreatedRoom(null)}
-                  className="w-full text-slate-400 text-sm hover:text-white transition"
-                >
-                  別のルームを作る
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 生徒カード */}
-          <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-            <h2 className="text-xl font-bold mb-1">👨‍🎓 生徒の方へ</h2>
-            <p className="text-slate-400 text-sm mb-5">講師からもらったコードで入室</p>
-
+      <div className="w-full max-w-md space-y-6">
+        {/* 講師エリア */}
+        <div className="bg-white rounded-2xl shadow-md p-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-4">📚 講師の方</h2>
+          {!createdRoom ? (
+            <button
+              onClick={handleCreateRoom}
+              disabled={creating}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-semibold py-3 px-6 rounded-xl transition"
+            >
+              {creating ? '作成中...' : 'ルームを作成する'}
+            </button>
+          ) : (
             <div className="space-y-3">
-              <input
-                type="text"
-                value={studentCode}
-                onChange={(e) => setStudentCode(e.target.value.toUpperCase())}
-                onKeyDown={(e) => e.key === 'Enter' && handleStudentEnter()}
-                maxLength={6}
-                placeholder="XXXXXX"
-                className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl px-4 py-3 text-center text-2xl font-mono tracking-widest uppercase focus:outline-none focus:border-blue-500"
-              />
-              <button
-                onClick={handleStudentEnter}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-lg transition"
+              <p className="text-sm text-gray-600">ルームが作成されました！</p>
+              <div className="bg-indigo-50 rounded-xl p-4">
+                <p className="text-xs text-gray-500 mb-1">生徒の入室コード</p>
+                <p className="text-3xl font-bold text-indigo-700 tracking-widest">{createdRoom.code}</p>
+              </div>
+              <a
+                href={createdRoom.teacherUrl}
+                className="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-xl transition"
               >
-                入室する
+                講師画面へ進む →
+              </a>
+              <button
+                onClick={() => { setCreatedRoom(null); setError('') }}
+                className="w-full text-sm text-gray-400 hover:text-gray-600"
+              >
+                別のルームを作成
               </button>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* フッター説明 */}
-        <div className="mt-10 text-center text-slate-500 text-sm space-y-1">
-          <p>🔒 ログイン不要 · DBなし · Pusherリアルタイム通信</p>
-          <p>中1〜中3 全300問対応</p>
+        {/* 生徒エリア */}
+        <div className="bg-white rounded-2xl shadow-md p-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-4">🎓 生徒の方</h2>
+          <form onSubmit={handleStudentJoin} className="space-y-3">
+            <input
+              type="text"
+              value={studentCode}
+              onChange={e => setStudentCode(e.target.value.toUpperCase())}
+              placeholder="ルームコードを入力（例: ABC123）"
+              maxLength={6}
+              className="w-full border-2 border-gray-200 focus:border-indigo-400 rounded-xl px-4 py-3 text-center text-xl font-bold tracking-widest uppercase outline-none transition"
+            />
+            <button
+              type="submit"
+              className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-xl transition"
+            >
+              入室する
+            </button>
+          </form>
         </div>
+
+        {error && (
+          <p className="text-center text-red-500 text-sm">{error}</p>
+        )}
       </div>
-    </div>
+    </main>
   )
 }

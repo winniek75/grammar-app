@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: '英文法 総復習 | リアルタイムレッスン',
-  description: '中学英文法のリアルタイム演習アプリ',
+  title: '中学英文法 総復習アプリ',
+  description: 'オンラインレッスン向けリアルタイム英文法問題演習',
 }
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body className="bg-gray-50 min-h-screen">{children}</body>
     </html>
   )
 }

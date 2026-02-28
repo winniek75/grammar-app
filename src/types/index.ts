@@ -1,9 +1,7 @@
-// ─────────────────────────────────────────────
-// 問題データ型
-// ─────────────────────────────────────────────
+export type QuestionType = 'choice' | 'typing' | 'sorting'
 
 export interface Choice {
-  id: string   // 'a' | 'b' | 'c' | 'd'
+  id: string
   text: string
 }
 
@@ -12,18 +10,14 @@ export interface Question {
   category: string
   grade: 1 | 2 | 3
   questionText: string
-  questionType: 'choice' | 'typing' | 'sorting'
+  questionType: QuestionType
   choices?: Choice[]
-  correctAnswer: string   // choice: 選択肢ID / typing: 文字列 / sorting: スペース区切り文
+  correctAnswer: string
   sortWords?: string[]
   explanation: string
   explanationShort: string
   hint: string
 }
-
-// ─────────────────────────────────────────────
-// ルーム状態型（In-memory store）
-// ─────────────────────────────────────────────
 
 export interface Participant {
   id: string
@@ -44,9 +38,9 @@ export interface Answer {
 
 export interface RoomState {
   id: string
-  code: string              // 6桁入室コード（大文字英数字）
-  adminKey: string          // 講師URL用 UUID v4
-  mode: 'choice' | 'typing' | 'sorting'
+  code: string
+  adminKey: string
+  mode: QuestionType
   currentQuestionId: string | null
   showAnswer: boolean
   showExplanation: boolean
@@ -56,76 +50,27 @@ export interface RoomState {
   createdAt: Date
 }
 
-// ─────────────────────────────────────────────
-// Pusher イベント型
-// ─────────────────────────────────────────────
-
-export interface QuestionChangeEvent {
+// Pusher event payloads
+export interface QuestionChangePayload {
   questionId: string
-  mode: 'choice' | 'typing' | 'sorting'
-  showAnswer: boolean
-  showExplanation: boolean
+  mode: QuestionType
 }
 
-export interface ShowAnswerEvent {
+export interface ShowAnswerPayload {
   showAnswer: boolean
   showExplanation: boolean
+  correctAnswer: string
 }
 
-export interface AnswerSubmittedEvent {
+export interface AnswerSubmittedPayload {
   participantId: string
   participantName: string
   questionId: string
   answerText: string
   isCorrect: boolean
-  answeredAt: string
 }
 
-export interface ParticipantJoinedEvent {
+export interface ParticipantJoinedPayload {
   participantId: string
-  participantName: string
-  joinedAt: string
-}
-
-export interface RoomFinishedEvent {
-  roomId: string
-}
-
-export type PusherEventMap = {
-  'question-change': QuestionChangeEvent
-  'show-answer': ShowAnswerEvent
-  'answer-submitted': AnswerSubmittedEvent
-  'participant-joined': ParticipantJoinedEvent
-  'room-finished': RoomFinishedEvent
-}
-
-// ─────────────────────────────────────────────
-// API レスポンス型
-// ─────────────────────────────────────────────
-
-export interface CreateRoomResponse {
-  roomId: string
-  roomCode: string
-  adminKey: string
-  teacherUrl: string
-  studentCode: string
-}
-
-export interface JoinRoomResponse {
-  participantId: string
-  sessionId: string
-  roomId: string
-  roomCode: string
-}
-
-export interface RoomStateResponse {
-  id: string
-  code: string
-  mode: RoomState['mode']
-  currentQuestionId: string | null
-  showAnswer: boolean
-  showExplanation: boolean
-  status: RoomState['status']
-  participantCount: number
-  answerCount: number
+  name: string
 }

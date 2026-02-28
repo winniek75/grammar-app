@@ -1,32 +1,8 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { Question } from '@/types'
-
-// ─────────────────────────────────────────────
-// ID 生成
-// ─────────────────────────────────────────────
-
-export function generateRoomId(): string {
-  return uuidv4()
-}
-
-export function generateAdminKey(): string {
-  return uuidv4()
-}
-
-export function generateParticipantId(): string {
-  return uuidv4()
-}
-
-export function generateAnswerId(): string {
-  return uuidv4()
-}
-
-// ─────────────────────────────────────────────
-// 6桁入室コード生成（大文字英数字）
-// ─────────────────────────────────────────────
+import { QuestionType } from '@/types'
 
 export function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // 紛らわしい文字を除く
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let code = ''
   for (let i = 0; i < 6; i++) {
     code += chars[Math.floor(Math.random() * chars.length)]
@@ -34,40 +10,27 @@ export function generateRoomCode(): string {
   return code
 }
 
-// ─────────────────────────────────────────────
-// 回答の正誤チェック
-// ─────────────────────────────────────────────
+export function generateAdminKey(): string {
+  return uuidv4()
+}
 
-export function checkAnswer(question: Question, userAnswer: string): boolean {
-  const correct = question.correctAnswer
+export function generateId(): string {
+  return uuidv4()
+}
 
-  switch (question.questionType) {
-    case 'choice':
-      return userAnswer.toLowerCase() === correct.toLowerCase()
-
-    case 'typing':
-      return userAnswer.trim().toLowerCase() === correct.trim().toLowerCase()
-
-    case 'sorting': {
-      // sortWords を正しい順で並べた文字列と比較
-      const userNorm = userAnswer.replace(/\s+/g, ' ').trim().toLowerCase()
-      const correctNorm = correct.replace(/\s+/g, ' ').trim().toLowerCase()
-      return userNorm === correctNorm
-    }
-
-    default:
-      return false
+export function checkAnswer(
+  userAnswer: string,
+  correctAnswer: string,
+  mode: QuestionType
+): boolean {
+  if (mode === 'typing') {
+    return userAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
   }
-}
-
-// ─────────────────────────────────────────────
-// バリデーション
-// ─────────────────────────────────────────────
-
-export function isValidMode(mode: string): mode is 'choice' | 'typing' | 'sorting' {
-  return ['choice', 'typing', 'sorting'].includes(mode)
-}
-
-export function isValidGrade(grade: number): grade is 1 | 2 | 3 {
-  return [1, 2, 3].includes(grade)
+  if (mode === 'choice') {
+    return userAnswer === correctAnswer
+  }
+  if (mode === 'sorting') {
+    return userAnswer.trim() === correctAnswer.trim()
+  }
+  return false
 }

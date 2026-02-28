@@ -1,4 +1,4 @@
-import { Question } from '@/types'
+import { Question } from '../types'
 
 export const questions: Question[] = [
 
@@ -1833,6 +1833,9 @@ export const questions: Question[] = [
     explanationShort: 'come → came（不規則変化）',
     hint: 'comeの過去形は特別な形です。',
   },
+
+  // ============================================================
+  // 中2 - 過去形（規則・不規則）残り10問 q101〜q110
   // ============================================================
   {
     id: 'q101',
@@ -3662,6 +3665,9 @@ export const questions: Question[] = [
     explanationShort: 'expensive → the most expensive（最上級）',
     hint: 'expensiveの最上級の作り方は？',
   },
+
+  // ============================================================
+  // 中3 - 受動態 q201〜q215
   // ============================================================
   {
     id: 'q201',
@@ -5491,4 +5497,5 @@ export const questions: Question[] = [
     explanationShort: '仮定法過去: If + 過去形, would + 動詞原形',
     hint: '仮定法過去では If の後ろの動詞は過去形（had）です。',
   },
+
 ]
