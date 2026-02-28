@@ -287,20 +287,22 @@ export default function StudentRoomPage() {
 
             {room.mode === 'typing' && (
               <TypingQuestion
-                onAnswer={handleSubmitAnswer}
-                disabled={hasAnswered}
-                correctAnswer={room.showAnswer ? currentQuestion.correctAnswer : null}
-                myAnswer={myAnswer}
+                value={hasAnswered ? myAnswer : ''}
+                correct={room.showAnswer ? currentQuestion.correctAnswer : null}
+                submitted={hasAnswered}
+                isCorrect={isCorrect}
+                onChange={(v) => !hasAnswered && setMyAnswer(v)}
+                onSubmit={() => !hasAnswered && handleSubmitAnswer(myAnswer)}
               />
             )}
 
             {room.mode === 'sorting' && currentQuestion.sortWords && (
               <SortingQuestion
                 words={currentQuestion.sortWords}
-                onAnswer={handleSubmitAnswer}
-                disabled={hasAnswered}
-                correctAnswer={room.showAnswer ? currentQuestion.correctAnswer : null}
-                myAnswer={myAnswer}
+                correct={room.showAnswer ? currentQuestion.correctAnswer : null}
+                submitted={hasAnswered}
+                isCorrect={isCorrect}
+                onSubmit={(answer) => !hasAnswered && handleSubmitAnswer(answer)}
               />
             )}
 
