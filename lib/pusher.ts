@@ -16,10 +16,16 @@ function createPusherServer(): Pusher {
   const secret = process.env.PUSHER_SECRET
   const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER
 
+  // ビルド時はダミー値を使用
   if (!appId || !key || !secret || !cluster) {
-    throw new Error(
-      '環境変数が設定されていません。.env.local に PUSHER_APP_ID / NEXT_PUBLIC_PUSHER_APP_KEY / PUSHER_SECRET / NEXT_PUBLIC_PUSHER_CLUSTER を設定してください。'
-    )
+    console.warn('Pusher environment variables not set. Using dummy values for build.')
+    return new Pusher({
+      appId: 'dummy',
+      key: 'dummy',
+      secret: 'dummy',
+      cluster: 'ap3',
+      useTLS: true,
+    })
   }
 
   return new Pusher({
@@ -31,9 +37,26 @@ function createPusherServer(): Pusher {
   })
 }
 
-// サーバーレス関数でも再利用できるようグローバルにキャッシュ
-export const pusherServer: Pusher =
-  global.pusherServer ?? (global.pusherServer = createPusherServer())
+// サーバーレス関数でも再利用できるようグローバルにキャッシュ（遅延初期化）
+let pusherServerInstance: Pusher | null = null
+
+export function getPusherServer(): Pusher {
+  if (!pusherServerInstance) {
+    if (!global.pusherServer) {
+      global.pusherServer = createPusherServer()
+    }
+    pusherServerInstance = global.pusherServer
+  }
+  return pusherServerInstance
+}
+
+// 後方互換性のためのエクスポート
+export const pusherServer = new Proxy({} as Pusher, {
+  get(target, prop) {
+    const server = getPusherServer()
+    return server[prop as keyof Pusher]
+  }
+})
 
 // ─────────────────────────────────────────────
 // チャンネル名ヘルパー
@@ -52,5 +75,7 @@ export async function triggerRoomEvent(
   event: string,
   data: Record<string, unknown>
 ): Promise<void> {
-  await pusherServer.trigger(getRoomChannel(roomId), event, data)
+  // 実行時にのみPusherを使用
+  const server = getPusherServer()
+  await server.trigger(getRoomChannel(roomId), event, data)
 }
