@@ -74,7 +74,7 @@ export async function POST(
     isCorrect,
     answeredAt: now.toISOString(),
   }
-  await triggerRoomEvent(params.id, 'answer-submitted', event)
+  await triggerRoomEvent(params.id, 'answer-submitted', event as Record<string, unknown>)
 
   return NextResponse.json({ isCorrect, answeredAt: now.toISOString() }, { status: 201 })
 }

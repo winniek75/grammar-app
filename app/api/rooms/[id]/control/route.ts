@@ -60,7 +60,7 @@ export async function POST(
         showAnswer: false,
         showExplanation: false,
       }
-      await triggerRoomEvent(params.id, 'question-change', event)
+      await triggerRoomEvent(params.id, 'question-change', event as Record<string, unknown>)
       return NextResponse.json({ ok: true, room: sanitize(updated) })
     }
 
@@ -76,7 +76,7 @@ export async function POST(
         showAnswer: body.showAnswer,
         showExplanation: body.showExplanation,
       }
-      await triggerRoomEvent(params.id, 'show-answer', event)
+      await triggerRoomEvent(params.id, 'show-answer', event as Record<string, unknown>)
       return NextResponse.json({ ok: true, room: sanitize(updated) })
     }
 
@@ -96,7 +96,7 @@ export async function POST(
       if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
 
       const event: RoomFinishedEvent = { roomId: params.id }
-      await triggerRoomEvent(params.id, 'room-finished', event)
+      await triggerRoomEvent(params.id, 'room-finished', event as Record<string, unknown>)
 
       // 少し待ってからメモリから削除
       setTimeout(() => deleteRoom(params.id), 5000)

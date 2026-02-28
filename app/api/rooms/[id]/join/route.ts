@@ -55,7 +55,7 @@ export async function POST(
     participantName: name,
     joinedAt: now.toISOString(),
   }
-  await triggerRoomEvent(params.id, 'participant-joined', event)
+  await triggerRoomEvent(params.id, 'participant-joined', event as Record<string, unknown>)
 
   const response: JoinRoomResponse = {
     participantId,
