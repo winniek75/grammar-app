@@ -1,4 +1,4 @@
-import { Question } from '../types'
+import { Question } from '@/lib/types'
 
 export const questions: Question[] = [
 
