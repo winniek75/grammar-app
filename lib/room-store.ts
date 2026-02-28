@@ -22,15 +22,19 @@ global.roomCodeIndex = global.roomCodeIndex ?? new Map<string, string>()
 export function createRoom(room: RoomState): RoomState {
   global.roomStore.set(room.id, room)
   global.roomCodeIndex.set(room.code, room.id)
+  console.log(`[RoomStore] Created room: ${room.id}, code: ${room.code}, total rooms: ${global.roomStore.size}`)
   return room
 }
 
 export function getRoom(roomId: string): RoomState | undefined {
-  return global.roomStore.get(roomId)
+  const room = global.roomStore.get(roomId)
+  console.log(`[RoomStore] Get room: ${roomId}, found: ${room ? 'yes' : 'no'}, total rooms: ${global.roomStore.size}`)
+  return room
 }
 
 export function getRoomByCode(code: string): RoomState | undefined {
   const roomId = global.roomCodeIndex.get(code.toUpperCase())
+  console.log(`[RoomStore] Get room by code: ${code}, roomId: ${roomId || 'not found'}, total rooms: ${global.roomStore.size}`)
   if (!roomId) return undefined
   return global.roomStore.get(roomId)
 }

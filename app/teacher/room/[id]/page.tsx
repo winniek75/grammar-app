@@ -96,7 +96,7 @@ export default function TeacherRoomPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           adminKey,
-          action: 'changeQuestion',
+          action: 'set-question',
           questionId,
           mode: 'choice'
         })
@@ -108,10 +108,12 @@ export default function TeacherRoomPage() {
         return
       }
 
-      const updatedRoom: RoomState = await res.json()
-      setRoom(updatedRoom)
-      const q = questions.find(q => q.id === questionId)
-      setCurrentQuestion(q || null)
+      const data = await res.json()
+      if (data.room) {
+        setRoom(data.room)
+        const q = questions.find(q => q.id === questionId)
+        setCurrentQuestion(q || null)
+      }
     } catch {
       alert('問題の変更に失敗しました')
     }
@@ -125,7 +127,7 @@ export default function TeacherRoomPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           adminKey,
-          action: 'toggleAnswer',
+          action: 'show-answer',
           showAnswer,
           showExplanation
         })
@@ -136,8 +138,10 @@ export default function TeacherRoomPage() {
         return
       }
 
-      const updatedRoom: RoomState = await res.json()
-      setRoom(updatedRoom)
+      const data = await res.json()
+      if (data.room) {
+        setRoom(data.room)
+      }
     } catch {
       alert('表示の切り替えに失敗しました')
     }
