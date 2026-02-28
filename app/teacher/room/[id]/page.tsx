@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { pusherClient, getRoomChannel } from '@/lib/pusher-client'
 import { questions } from '@/src/data/questions'
 import type { RoomState, Question, Answer, Participant } from '@/types'
-import RoomControls from '@/src/components/teacher/RoomControls'
+import QuestionSelector from '@/src/components/teacher/QuestionSelector'
 import StudentAnswers from '@/src/components/teacher/StudentAnswers'
 import ExplanationPanel from '@/src/components/teacher/ExplanationPanel'
 
@@ -207,7 +207,7 @@ export default function TeacherRoomPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 左側：問題選択 */}
           <div className="lg:col-span-1">
-            <RoomControls
+            <QuestionSelector
               questions={filteredQuestions}
               currentQuestionId={room.currentQuestionId}
               onQuestionChange={handleQuestionChange}
