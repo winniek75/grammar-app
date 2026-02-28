@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRoom, setRoom } from '@/lib/room-store'
 import { pusherServer } from '@/lib/pusher'
-import { questions } from '@/data/questions'
+import { questions } from '@/src/data/questions'
 import { QuestionType } from '@/types'
 
 export async function POST(

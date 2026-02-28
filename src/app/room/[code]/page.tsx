@@ -7,7 +7,7 @@ import ChoiceQuestion from '@/components/questions/ChoiceQuestion'
 import TypingQuestion from '@/components/questions/TypingQuestion'
 import SortingQuestion from '@/components/questions/SortingQuestion'
 import { Question, QuestionType } from '@/types'
-import { questions as allQuestions } from '@/data/questions'
+import { questions as allQuestions } from '@/src/data/questions'
 
 type Phase = 'enter-name' | 'waiting' | 'question' | 'finished'
 

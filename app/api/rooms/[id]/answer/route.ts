@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getRoom, addAnswer } from '@/lib/room-store'
 import { generateAnswerId, checkAnswer } from '@/lib/utils'
 import { triggerRoomEvent } from '@/lib/pusher'
-import { questions } from '@/data/questions'
+import { questions } from '@/src/data/questions'
 import type { Answer, AnswerSubmittedEvent } from '@/types'
 
 export const runtime = 'nodejs'
