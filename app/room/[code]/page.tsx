@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { pusherClient, getRoomChannel } from '@/lib/pusher-client'
-import { questions } from '@/src/data/questions'
-import ChoiceQuestion from '@/src/components/questions/ChoiceQuestion'
-import TypingQuestion from '@/src/components/questions/TypingQuestion'
-import SortingQuestion from '@/src/components/questions/SortingQuestion'
-import type { RoomState, Question, Participant } from '@/types'
+import { questions } from '@/app/data/questions'
+import ChoiceQuestion from '@/app/components/questions/ChoiceQuestion'
+import TypingQuestion from '@/app/components/questions/TypingQuestion'
+import SortingQuestion from '@/app/components/questions/SortingQuestion'
+import type { RoomState, Question, Participant } from '@/lib/types'
 
 export default function StudentRoomPage() {
   const router = useRouter()

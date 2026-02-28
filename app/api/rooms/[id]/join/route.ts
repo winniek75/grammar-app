@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getRoom, addParticipant } from '@/lib/room-store'
 import { generateParticipantId } from '@/lib/utils'
 import { triggerRoomEvent } from '@/lib/pusher'
-import type { Participant, JoinRoomResponse, ParticipantJoinedEvent } from '@/types'
+import type { Participant, JoinRoomResponse, ParticipantJoinedEvent } from '@/lib/types'
 
 export const runtime = 'nodejs'
 

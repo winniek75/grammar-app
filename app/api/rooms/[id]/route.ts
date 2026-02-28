@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getRoom } from '@/lib/room-store'
-import type { RoomStateResponse } from '@/types'
+import type { RoomStateResponse } from '@/lib/types'
 
 export const runtime = 'nodejs'
 

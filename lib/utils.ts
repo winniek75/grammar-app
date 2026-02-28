@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { Question } from '@/types'
+import type { Question } from '@/lib/types'
 
 // ─────────────────────────────────────────────
 // ID / コード生成

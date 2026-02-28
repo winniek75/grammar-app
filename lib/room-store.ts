@@ -1,4 +1,4 @@
-import type { RoomState, Participant, Answer } from '@/types'
+import type { RoomState, Participant, Answer } from '@/lib/types'
 
 // ─────────────────────────────────────────────
 // グローバル変数でルーム状態を保持

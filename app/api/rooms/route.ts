@@ -6,7 +6,7 @@ import {
   generateAdminKey,
   getTeacherUrl,
 } from '@/lib/utils'
-import type { RoomState, CreateRoomResponse } from '@/types'
+import type { RoomState, CreateRoomResponse } from '@/lib/types'
 
 export const runtime = 'nodejs'
 

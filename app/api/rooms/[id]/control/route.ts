@@ -6,7 +6,7 @@ import type {
   QuestionChangeEvent,
   ShowAnswerEvent,
   RoomFinishedEvent,
-} from '@/types'
+} from '@/lib/types'
 
 export const runtime = 'nodejs'
 

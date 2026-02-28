@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { pusherClient, getRoomChannel } from '@/lib/pusher-client'
-import { questions } from '@/src/data/questions'
-import type { RoomState, Question, Answer, Participant } from '@/types'
-import QuestionSelector from '@/src/components/teacher/QuestionSelector'
-import StudentAnswers from '@/src/components/teacher/StudentAnswers'
-import ExplanationPanel from '@/src/components/teacher/ExplanationPanel'
+import { questions } from '@/app/data/questions'
+import type { RoomState, Question, Answer, Participant } from '@/lib/types'
+import QuestionSelector from '@/app/components/teacher/QuestionSelector'
+import StudentAnswers from '@/app/components/teacher/StudentAnswers'
+import ExplanationPanel from '@/app/components/teacher/ExplanationPanel'
 
 export default function TeacherRoomPage() {
   const router = useRouter()

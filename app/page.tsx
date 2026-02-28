@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { CreateRoomResponse } from '@/types'
+import type { CreateRoomResponse } from '@/lib/types'
 
 export default function HomePage() {
   const router = useRouter()
