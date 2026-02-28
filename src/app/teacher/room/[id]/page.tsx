@@ -1,496 +1,489 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useParams, useSearchParams, useRouter } from 'next/navigation'
-import { useTeacherRoom, useControlRoom } from '@/hooks/usePusher'
-import StudentAnswers from '@/components/teacher/StudentAnswers'
-import ExplanationPanel from '@/components/teacher/ExplanationPanel'
-import RoomControls from '@/components/teacher/RoomControls'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
+import { Question } from '@/types'
 import { questions as allQuestions } from '@/data/questions'
-import type {
-  RoomState,
-  Question,
-  AnswerSubmittedEvent,
-  ParticipantJoinedEvent,
-} from '@/types'
+import { GRADE_CATEGORIES } from '@/lib/question-categories'
+import RoomHeader from '@/components/teacher/RoomHeader'
+import QuestionFilter from '@/components/teacher/QuestionFilter'
+import QuestionDisplay from '@/components/teacher/QuestionDisplay'
+import RoomControls from '@/components/teacher/RoomControls'
+import StudentAnswers from '@/components/teacher/StudentAnswers'
 
-// ─────────────────────────────────────────────
-// Pusher 接続ステータスバッジ
-// ─────────────────────────────────────────────
-function ConnectionBadge({ connected }: { connected: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-        connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
-      }`}
-    >
-      <span
-        className={`w-1.5 h-1.5 rounded-full ${
-          connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
-        }`}
-      />
-      {connected ? 'リアルタイム接続中' : '接続中...'}
-    </span>
-  )
+// ==========================================================
+// 型定義
+// ==========================================================
+interface Participant {
+  id: string
+  name: string
 }
 
-// ─────────────────────────────────────────────
-// 学年・カテゴリ絞り込みフィルター
-// ─────────────────────────────────────────────
-interface FilterState {
-  grade: 0 | 1 | 2 | 3   // 0 = 全学年
-  category: string         // '' = 全カテゴリ
+interface StudentAnswer {
+  participantId: string
+  participantName: string
+  answerText: string
+  isCorrect: boolean
+  answeredAt: string
 }
 
-function QuestionFilter({
-  filter,
-  onChange,
-  filteredCount,
-}: {
-  filter: FilterState
-  onChange: (f: FilterState) => void
-  filteredCount: number
-}) {
-  const categories = useMemo(() => {
-    const gradeQ = filter.grade === 0 ? allQuestions : allQuestions.filter((q) => q.grade === filter.grade)
-    return [...new Set(gradeQ.map((q) => q.category))]
-  }, [filter.grade])
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-bold text-slate-800 text-sm">問題フィルター</h2>
-        <span className="text-xs text-slate-500">{filteredCount}問</span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {/* 学年 */}
-        {([0, 1, 2, 3] as const).map((g) => (
-          <button
-            key={g}
-            onClick={() => onChange({ grade: g, category: '' })}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              filter.grade === g
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {g === 0 ? '全学年' : `中${g}`}
-          </button>
-        ))}
-        <span className="text-slate-300">|</span>
-        {/* カテゴリ */}
-        <button
-          onClick={() => onChange({ ...filter, category: '' })}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-            filter.category === ''
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          全カテゴリ
-        </button>
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => onChange({ ...filter, category: cat })}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              filter.category === cat
-                ? 'bg-indigo-600 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+interface RoomState {
+  id: string
+  code: string
+  mode: 'choice' | 'typing' | 'sorting'
+  currentQuestionId: string | null
+  showAnswer: boolean
+  showExplanation: boolean
+  status: 'waiting' | 'active' | 'finished'
+  participants: Participant[]
+  answers: Array<{
+    questionId: string
+    participantId: string
+    answerText: string
+    isCorrect: boolean
+    answeredAt: string
+  }>
 }
 
-// ─────────────────────────────────────────────
-// 現在の問題表示カード
-// ─────────────────────────────────────────────
-function CurrentQuestionCard({
-  question,
-  mode,
-}: {
-  question: Question | null
-  mode: string
-}) {
-  if (!question) {
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center">
-        <p className="text-4xl mb-3">📚</p>
-        <p className="text-slate-500 text-sm">問題を選択して授業を開始しましょう</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-3">
-        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold">
-          中{question.grade}
-        </span>
-        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-lg text-xs">
-          {question.category}
-        </span>
-        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold ml-auto">
-          {mode === 'choice' ? '選択' : mode === 'typing' ? 'タイピング' : '並べ替え'}
-        </span>
-        <span className="text-slate-400 text-xs">#{question.id}</span>
-      </div>
-      <div className="px-5 py-6">
-        <p className="text-xl font-bold text-slate-800 leading-relaxed">
-          {question.questionText}
-        </p>
-        {mode === 'choice' && question.choices && (
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {question.choices.map((c) => (
-              <div
-                key={c.id}
-                className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700"
-              >
-                <span className="font-bold text-slate-400 mr-2">{c.id.toUpperCase()}.</span>
-                {c.text}
-              </div>
-            ))}
-          </div>
-        )}
-        {mode === 'sorting' && question.sortWords && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {question.sortWords.map((w, i) => (
-              <span
-                key={i}
-                className="px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700"
-              >
-                {w}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────
-// メイン: 講師パネル
-// ─────────────────────────────────────────────
+// ==========================================================
+// メインコンポーネント
+// ==========================================================
 export default function TeacherRoomPage() {
   const params = useParams()
   const searchParams = useSearchParams()
-  const router = useRouter()
-
   const roomId = params.id as string
-  const adminKey = searchParams.get('key')
+  const adminKey = searchParams.get('key') || ''
 
-  // ── ルーム状態 ────────────────────────────────
+  // ----- ルーム状態 -----
   const [room, setRoom] = useState<RoomState | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [pusherConnected, setPusherConnected] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // ── 問題フィルター ────────────────────────────
-  const [filter, setFilter] = useState<FilterState>({ grade: 0, category: '' })
-  const [questionIndex, setQuestionIndex] = useState(0)
+  // ----- フィルター状態 -----
+  const [selectedGrades, setSelectedGrades] = useState<number[]>([])
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
 
-  // ── リアルタイムイベント蓄積 ──────────────────
-  const [realtimeAnswers, setRealtimeAnswers] = useState<AnswerSubmittedEvent[]>([])
-  const [participants, setParticipants] = useState<ParticipantJoinedEvent[]>([])
-  const [notification, setNotification] = useState<string | null>(null)
+  // ----- 現在の問題インデックス -----
+  const [currentIndex, setCurrentIndex] = useState(-1)
 
-  // ── フィルタ済み問題リスト ─────────────────────
+  // ----- ローカル状態 -----
+  const [mode, setMode] = useState<'choice' | 'typing' | 'sorting'>('choice')
+  const [showAnswer, setShowAnswer] = useState(false)
+  const [showExplanation, setShowExplanation] = useState(false)
+  const [participants, setParticipants] = useState<Participant[]>([])
+  const [currentAnswers, setCurrentAnswers] = useState<StudentAnswer[]>([])
+  const [isConnected, setIsConnected] = useState(false)
+  const [isFinished, setIsFinished] = useState(false)
+
+  // ----- Pusher ref -----
+  const pusherRef = useRef<any>(null)
+  const channelRef = useRef<any>(null)
+
+  // ==========================================================
+  // フィルタリングされた問題リスト
+  // ==========================================================
   const filteredQuestions = useMemo(() => {
-    let q = allQuestions
-    if (filter.grade !== 0) q = q.filter((x) => x.grade === filter.grade)
-    if (filter.category) q = q.filter((x) => x.category === filter.category)
-    return q
-  }, [filter])
+    let qs = [...allQuestions]
 
+    // 学年フィルター
+    if (selectedGrades.length > 0) {
+      qs = qs.filter((q) => selectedGrades.includes(q.grade))
+    }
+
+    // カテゴリフィルター
+    if (selectedCategories.length > 0) {
+      qs = qs.filter((q) => selectedCategories.includes(q.category))
+    }
+
+    return qs
+  }, [selectedGrades, selectedCategories])
+
+  // 現在の問題
   const currentQuestion: Question | null =
-    filteredQuestions[questionIndex] ?? null
+    currentIndex >= 0 && currentIndex < filteredQuestions.length
+      ? filteredQuestions[currentIndex]
+      : null
 
-  // ── 問題インデックス補正 ──────────────────────
+  // ==========================================================
+  // ルーム状態の初回取得
+  // ==========================================================
   useEffect(() => {
-    setQuestionIndex(0)
-    setRealtimeAnswers([])
-  }, [filter])
+    const fetchRoom = async () => {
+      try {
+        const res = await fetch(`/api/rooms/${roomId}/state?key=${adminKey}`)
+        if (!res.ok) {
+          if (res.status === 403) {
+            setError('アクセス権がありません。URLが正しいか確認してください。')
+          } else if (res.status === 404) {
+            setError('ルームが見つかりません。')
+          } else {
+            setError('ルーム情報の取得に失敗しました。')
+          }
+          setLoading(false)
+          return
+        }
+        const data = await res.json()
+        setRoom(data)
+        setMode(data.mode || 'choice')
+        setShowAnswer(data.showAnswer || false)
+        setShowExplanation(data.showExplanation || false)
+        setParticipants(data.participants || [])
+        setIsFinished(data.status === 'finished')
 
-  // ── ルーム情報初期取得 ────────────────────────
-  useEffect(() => {
-    if (!roomId || !adminKey) return
+        // 現在の問題IDがあればインデックスを設定
+        if (data.currentQuestionId) {
+          const idx = allQuestions.findIndex(
+            (q) => q.id === data.currentQuestionId
+          )
+          if (idx >= 0) setCurrentIndex(idx)
+        }
+      } catch (e) {
+        setError('接続エラーが発生しました。')
+      } finally {
+        setLoading(false)
+      }
+    }
 
-    fetch(`/api/rooms/${roomId}/state`, {
-      headers: { 'x-admin-key': adminKey },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) setLoadError(data.error)
-        else setRoom(data)
-      })
-      .catch(() => setLoadError('ルーム情報の取得に失敗しました'))
+    if (roomId && adminKey) {
+      fetchRoom()
+    } else {
+      setError('ルームIDまたは管理キーが不足しています。')
+      setLoading(false)
+    }
   }, [roomId, adminKey])
 
-  // ── Pusher接続状態の監視 ─────────────────────
+  // ==========================================================
+  // Pusher接続
+  // ==========================================================
   useEffect(() => {
-    import('@/lib/pusher-client').then(({ getPusherClient }) => {
-      const client = getPusherClient()
-      client.connection.bind('connected', () => setPusherConnected(true))
-      client.connection.bind('disconnected', () => setPusherConnected(false))
-      if (client.connection.state === 'connected') setPusherConnected(true)
-    })
-  }, [])
+    if (!roomId || !room) return
 
-  // ── Pusher 購読（生徒→講師 イベント受信）────────
-  const handleAnswerSubmitted = useCallback((data: AnswerSubmittedEvent) => {
-    setRealtimeAnswers((prev) => {
-      const filtered = prev.filter(
-        (a) => !(a.participantId === data.participantId && a.questionId === data.questionId)
-      )
-      return [...filtered, data]
-    })
-    showNotification(`${data.participantName} が回答しました`)
-  }, [])
+    let isMounted = true
 
-  const handleParticipantJoined = useCallback((data: ParticipantJoinedEvent) => {
-    setParticipants((prev) => {
-      if (prev.find((p) => p.participantId === data.participantId)) return prev
-      return [...prev, data]
-    })
-    showNotification(`${data.participantName} が入室しました 👋`)
-  }, [])
-
-  useTeacherRoom({
-    roomId,
-    onAnswerSubmitted: handleAnswerSubmitted,
-    onParticipantJoined: handleParticipantJoined,
-  })
-
-  // ── 操作API ───────────────────────────────────
-  const { setQuestion, showAnswer, setMode, finishRoom } = useControlRoom({
-    roomId,
-    adminKey,
-  })
-
-  // ── 問題セット ────────────────────────────────
-  const handleSetQuestion = useCallback(
-    async (question: Question) => {
-      if (!question) return
-      setIsLoading(true)
+    const connectPusher = async () => {
       try {
-        await setQuestion(question.id, room?.mode)
-        setRoom((prev) => prev ? { ...prev, currentQuestionId: question.id, showAnswer: false, showExplanation: false } : prev)
-        setRealtimeAnswers([])  // 問題切替で回答リセット
+        const { default: Pusher } = await import('pusher-js')
+        const pusher = new Pusher(
+          process.env.NEXT_PUBLIC_PUSHER_APP_KEY || '',
+          {
+            cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'ap3',
+          }
+        )
+
+        const channel = pusher.subscribe(`room-${roomId}`)
+
+        channel.bind('pusher:subscription_succeeded', () => {
+          if (isMounted) setIsConnected(true)
+        })
+
+        // 生徒入室
+        channel.bind(
+          'participant-joined',
+          (data: { participant: Participant }) => {
+            if (isMounted) {
+              setParticipants((prev) => {
+                if (prev.find((p) => p.id === data.participant.id)) return prev
+                return [...prev, data.participant]
+              })
+            }
+          }
+        )
+
+        // 回答受信
+        channel.bind('answer-submitted', (data: StudentAnswer) => {
+          if (isMounted) {
+            setCurrentAnswers((prev) => {
+              // 同じ参加者の同じ問題の回答は上書き
+              const filtered = prev.filter(
+                (a) => a.participantId !== data.participantId
+              )
+              return [...filtered, data]
+            })
+          }
+        })
+
+        pusherRef.current = pusher
+        channelRef.current = channel
       } catch (e) {
-        alert(e instanceof Error ? e.message : 'エラーが発生しました')
-      } finally {
-        setIsLoading(false)
+        console.error('Pusher connection error:', e)
       }
-    },
-    [setQuestion, room?.mode]
-  )
-
-  const handlePrev = useCallback(async () => {
-    const newIndex = Math.max(0, questionIndex - 1)
-    setQuestionIndex(newIndex)
-    const q = filteredQuestions[newIndex]
-    if (q) await handleSetQuestion(q)
-  }, [questionIndex, filteredQuestions, handleSetQuestion])
-
-  const handleNext = useCallback(async () => {
-    const newIndex = Math.min(filteredQuestions.length - 1, questionIndex + 1)
-    setQuestionIndex(newIndex)
-    const q = filteredQuestions[newIndex]
-    if (q) await handleSetQuestion(q)
-  }, [questionIndex, filteredQuestions, handleSetQuestion])
-
-  const handleRandom = useCallback(async () => {
-    if (filteredQuestions.length === 0) return
-    const newIndex = Math.floor(Math.random() * filteredQuestions.length)
-    setQuestionIndex(newIndex)
-    await handleSetQuestion(filteredQuestions[newIndex])
-  }, [filteredQuestions, handleSetQuestion])
-
-  const handleShowAnswer = useCallback(
-    async (show: boolean, showExp: boolean) => {
-      setIsLoading(true)
-      try {
-        await showAnswer(show, showExp)
-        setRoom((prev) => prev ? { ...prev, showAnswer: show, showExplanation: showExp } : prev)
-      } catch (e) {
-        alert(e instanceof Error ? e.message : 'エラー')
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [showAnswer]
-  )
-
-  const handleSetMode = useCallback(
-    async (mode: 'choice' | 'typing' | 'sorting') => {
-      setIsLoading(true)
-      try {
-        await setMode(mode)
-        setRoom((prev) => prev ? { ...prev, mode } : prev)
-      } catch (e) {
-        alert(e instanceof Error ? e.message : 'エラー')
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [setMode]
-  )
-
-  const handleFinish = useCallback(async () => {
-    if (!confirm('授業を終了しますか？')) return
-    setIsLoading(true)
-    try {
-      await finishRoom()
-      router.push('/?finished=1')
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'エラー')
-      setIsLoading(false)
     }
-  }, [finishRoom, router])
 
-  // ── 通知トースト ──────────────────────────────
-  const showNotification = (msg: string) => {
-    setNotification(msg)
-    setTimeout(() => setNotification(null), 3000)
-  }
+    connectPusher()
 
-  // ── アクセス制御 ──────────────────────────────
-  if (!adminKey) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-8 shadow text-center max-w-sm">
-          <p className="text-4xl mb-4">🔒</p>
-          <h1 className="text-xl font-bold text-slate-800 mb-2">アクセスできません</h1>
-          <p className="text-slate-500 text-sm">講師URLからアクセスしてください。</p>
-        </div>
-      </div>
-    )
-  }
+    return () => {
+      isMounted = false
+      if (channelRef.current) {
+        channelRef.current.unbind_all()
+        channelRef.current.unsubscribe()
+      }
+      if (pusherRef.current) {
+        pusherRef.current.disconnect()
+      }
+    }
+  }, [roomId, room])
 
-  if (loadError) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-8 shadow text-center max-w-sm">
-          <p className="text-4xl mb-4">⚠️</p>
-          <h1 className="text-xl font-bold text-slate-800 mb-2">エラー</h1>
-          <p className="text-slate-500 text-sm">{loadError}</p>
-        </div>
-      </div>
-    )
-  }
-
-  const totalParticipants = participants.length || room?.participants.length || 0
-  const currentAnswersForQuestion = realtimeAnswers.filter(
-    (a) => a.questionId === (room?.currentQuestionId ?? currentQuestion?.id)
+  // ==========================================================
+  // API操作
+  // ==========================================================
+  const controlRoom = useCallback(
+    async (action: string, payload: Record<string, any> = {}) => {
+      try {
+        const res = await fetch(`/api/rooms/${roomId}/control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adminKey, action, ...payload }),
+        })
+        if (!res.ok) {
+          console.error('Control API error:', res.status)
+        }
+        return res.ok
+      } catch (e) {
+        console.error('Control API error:', e)
+        return false
+      }
+    },
+    [roomId, adminKey]
   )
 
-  return (
-    <div className="min-h-screen bg-slate-100">
-      {/* トースト通知 */}
-      {notification && (
-        <div className="fixed top-4 right-4 z-50 bg-slate-800 text-white px-4 py-3 rounded-2xl shadow-lg text-sm font-medium animate-fade-in">
-          {notification}
-        </div>
-      )}
+  // ----- 問題変更 -----
+  const changeQuestion = useCallback(
+    async (question: Question) => {
+      setShowAnswer(false)
+      setShowExplanation(false)
+      setCurrentAnswers([]) // 回答リセット
+      await controlRoom('setQuestion', {
+        questionId: question.id,
+        mode,
+      })
+    },
+    [controlRoom, mode]
+  )
 
-      {/* ヘッダー */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
-          <div className="flex items-center gap-3 flex-1">
-            <h1 className="font-bold text-slate-800">🎓 講師パネル</h1>
-            {room && (
-              <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold tracking-widest">
-                CODE: {room.code}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">
-              👥 {totalParticipants}名
-            </span>
-            <ConnectionBadge connected={pusherConnected} />
-          </div>
+  // ----- 次の問題 -----
+  const handleNext = useCallback(() => {
+    const nextIdx =
+      currentIndex < 0 ? 0 : Math.min(currentIndex + 1, filteredQuestions.length - 1)
+    if (nextIdx < filteredQuestions.length) {
+      setCurrentIndex(nextIdx)
+      changeQuestion(filteredQuestions[nextIdx])
+    }
+  }, [currentIndex, filteredQuestions, changeQuestion])
+
+  // ----- 前の問題 -----
+  const handlePrev = useCallback(() => {
+    const prevIdx = Math.max(currentIndex - 1, 0)
+    setCurrentIndex(prevIdx)
+    changeQuestion(filteredQuestions[prevIdx])
+  }, [currentIndex, filteredQuestions, changeQuestion])
+
+  // ----- ランダム -----
+  const handleRandom = useCallback(() => {
+    if (filteredQuestions.length === 0) return
+    const randomIdx = Math.floor(Math.random() * filteredQuestions.length)
+    setCurrentIndex(randomIdx)
+    changeQuestion(filteredQuestions[randomIdx])
+  }, [filteredQuestions, changeQuestion])
+
+  // ----- 正答表示トグル -----
+  const handleToggleAnswer = useCallback(async () => {
+    const newVal = !showAnswer
+    setShowAnswer(newVal)
+    if (!newVal) setShowExplanation(false)
+    await controlRoom('showAnswer', {
+      showAnswer: newVal,
+      showExplanation: !newVal ? false : showExplanation,
+    })
+  }, [showAnswer, showExplanation, controlRoom])
+
+  // ----- 解説表示トグル -----
+  const handleToggleExplanation = useCallback(async () => {
+    const newVal = !showExplanation
+    setShowExplanation(newVal)
+    await controlRoom('showAnswer', {
+      showAnswer,
+      showExplanation: newVal,
+    })
+  }, [showExplanation, showAnswer, controlRoom])
+
+  // ----- モード変更 -----
+  const handleModeChange = useCallback(
+    async (newMode: 'choice' | 'typing' | 'sorting') => {
+      setMode(newMode)
+      // 現在の問題があれば再送信（モード変更を反映）
+      if (currentQuestion) {
+        setShowAnswer(false)
+        setShowExplanation(false)
+        setCurrentAnswers([])
+        await controlRoom('setQuestion', {
+          questionId: currentQuestion.id,
+          mode: newMode,
+        })
+      }
+    },
+    [currentQuestion, controlRoom]
+  )
+
+  // ----- 授業終了 -----
+  const handleFinish = useCallback(async () => {
+    if (
+      window.confirm(
+        '授業を終了しますか？\n生徒全員に終了通知が送信されます。'
+      )
+    ) {
+      await controlRoom('finish')
+      setIsFinished(true)
+    }
+  }, [controlRoom])
+
+  // ==========================================================
+  // フィルター変更時にインデックスリセット
+  // ==========================================================
+  useEffect(() => {
+    // フィルター変更したら、現在の問題がフィルタに含まれるかチェック
+    if (currentQuestion) {
+      const newIdx = filteredQuestions.findIndex(
+        (q) => q.id === currentQuestion.id
+      )
+      if (newIdx >= 0) {
+        setCurrentIndex(newIdx)
+      }
+      // フィルタ外になったら現在の問題はそのまま表示（インデックスだけ -1 にする）
+    }
+  }, [filteredQuestions])
+
+  // ==========================================================
+  // ローディング / エラー表示
+  // ==========================================================
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-3 border-violet-200 border-t-violet-500 rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-slate-500 mt-4">
+            ルーム情報を読み込み中…
+          </p>
         </div>
-      </header>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl border border-red-200 shadow-sm p-8 text-center max-w-md">
+          <div className="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center mx-auto mb-4">
+            <svg
+              className="w-7 h-7 text-red-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+              />
+            </svg>
+          </div>
+          <p className="text-red-700 font-semibold text-lg mb-2">
+            エラー
+          </p>
+          <p className="text-red-500 text-sm">{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!room) return null
+
+  // ==========================================================
+  // メインレイアウト
+  // ==========================================================
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* ヘッダー */}
+      <div className="sticky top-0 z-30 bg-slate-50/80 backdrop-blur-md border-b border-slate-200/60 px-4 py-3">
+        <div className="max-w-7xl mx-auto">
+          <RoomHeader
+            roomCode={room.code}
+            roomId={room.id}
+            status={isFinished ? 'finished' : currentQuestion ? 'active' : 'waiting'}
+            participantCount={participants.length}
+            isConnected={isConnected}
+          />
+        </div>
+      </div>
 
       {/* メインコンテンツ */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 左カラム: 問題選択 */}
-          <div className="lg:col-span-2 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 py-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* ====== 左カラム：問題表示エリア（7/12） ====== */}
+          <div className="lg:col-span-7 space-y-4">
             {/* フィルター */}
             <QuestionFilter
-              filter={filter}
-              onChange={setFilter}
+              selectedGrades={selectedGrades}
+              selectedCategories={selectedCategories}
+              onGradesChange={setSelectedGrades}
+              onCategoriesChange={setSelectedCategories}
               filteredCount={filteredQuestions.length}
+              totalCount={allQuestions.length}
             />
 
-            {/* 現在の問題 */}
-            <CurrentQuestionCard question={currentQuestion} mode={room?.mode ?? 'choice'} />
+            {/* 問題表示 */}
+            <QuestionDisplay
+              question={currentQuestion}
+              mode={mode}
+              showAnswer={showAnswer}
+              showExplanation={showExplanation}
+              questionIndex={currentIndex}
+              totalQuestions={filteredQuestions.length}
+            />
 
-            {/* 問題一覧（簡易） */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h2 className="font-bold text-slate-800 text-sm">問題一覧</h2>
-                <span className="text-xs text-slate-500">
-                  {questionIndex + 1} / {filteredQuestions.length}
-                </span>
-              </div>
-              <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-                {filteredQuestions.slice(0, 50).map((q, i) => (
-                  <button
-                    key={q.id}
-                    onClick={async () => {
-                      setQuestionIndex(i)
-                      await handleSetQuestion(q)
-                    }}
-                    disabled={isLoading}
-                    className={`w-full text-left px-5 py-3 text-sm hover:bg-slate-50 transition-colors ${
-                      i === questionIndex ? 'bg-blue-50' : ''
-                    }`}
-                  >
-                    <span className="text-slate-400 text-xs mr-2">#{q.id}</span>
-                    <span className="font-medium text-slate-700">{q.questionText}</span>
-                  </button>
-                ))}
-              </div>
+            {/* 生徒回答（PC未満で下に表示） */}
+            <div className="lg:hidden">
+              <StudentAnswers
+                participants={participants}
+                answers={currentAnswers}
+                currentQuestionId={currentQuestion?.id || null}
+                showAnswer={showAnswer}
+              />
             </div>
           </div>
 
-          {/* 右カラム: コントロール + 回答 */}
-          <div className="space-y-4">
+          {/* ====== 右カラム：操作パネル（5/12） ====== */}
+          <div className="lg:col-span-5 space-y-4">
+            {/* 操作パネル */}
             <RoomControls
-              currentQuestion={currentQuestion}
-              mode={room?.mode ?? 'choice'}
-              showAnswer={room?.showAnswer ?? false}
-              showExplanation={room?.showExplanation ?? false}
+              mode={mode}
+              showAnswer={showAnswer}
+              showExplanation={showExplanation}
+              hasQuestion={!!currentQuestion}
+              hasPrev={currentIndex > 0}
+              hasNext={currentIndex < filteredQuestions.length - 1}
+              isFinished={isFinished}
               onPrev={handlePrev}
               onNext={handleNext}
               onRandom={handleRandom}
-              onShowAnswer={handleShowAnswer}
-              onSetMode={handleSetMode}
+              onToggleAnswer={handleToggleAnswer}
+              onToggleExplanation={handleToggleExplanation}
+              onModeChange={handleModeChange}
               onFinish={handleFinish}
-              loading={isLoading}
             />
-            <ExplanationPanel
-              question={currentQuestion}
-              showAnswer={room?.showAnswer ?? false}
-              showExplanation={room?.showExplanation ?? false}
-            />
-            <StudentAnswers
-              answers={currentAnswersForQuestion}
-              totalParticipants={totalParticipants}
-              showCorrect={room?.showAnswer ?? false}
-            />
+
+            {/* 生徒回答（PCで右に表示） */}
+            <div className="hidden lg:block">
+              <StudentAnswers
+                participants={participants}
+                answers={currentAnswers}
+                currentQuestionId={currentQuestion?.id || null}
+                showAnswer={showAnswer}
+              />
+            </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   )
 }

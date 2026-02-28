@@ -1,18 +1,26 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getRoom } from '@/lib/room-store'
 
 export const runtime = 'nodejs'
 
 export async function GET(
-  req: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const key = request.nextUrl.searchParams.get('key')
+
   const room = getRoom(params.id)
   if (!room) {
-    return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
+    return NextResponse.json({ error: 'Room not found' }, { status: 404 })
   }
 
-  // adminKey は返さない（講師も不要）
-  const { adminKey: _adminKey, ...safe } = room
-  return NextResponse.json(safe)
+  // adminKey チェック
+  if (room.adminKey !== key) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // adminKey は返さない
+  const { adminKey, ...safeRoom } = room
+
+  return NextResponse.json(safeRoom)
 }

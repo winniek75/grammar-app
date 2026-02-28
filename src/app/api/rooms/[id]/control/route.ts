@@ -1,109 +1,129 @@
-import { NextResponse } from 'next/server'
-import { getRoom, updateRoom, deleteRoom } from '@/lib/room-store'
-import { isValidMode } from '@/lib/utils'
-import { triggerRoomEvent } from '@/lib/pusher'
-import type {
-  QuestionChangeEvent,
-  ShowAnswerEvent,
-  RoomFinishedEvent,
-} from '@/types'
+import { NextRequest, NextResponse } from 'next/server'
+import { getRoom, updateRoom } from '@/lib/room-store'
+import { pusherServer } from '@/lib/pusher'
 
 export const runtime = 'nodejs'
 
-type ControlAction =
-  | { action: 'set-question'; questionId: string; mode?: string }
-  | { action: 'show-answer'; showAnswer: boolean; showExplanation: boolean }
-  | { action: 'set-mode'; mode: string }
-  | { action: 'finish-room' }
-
 export async function POST(
-  req: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const adminKey =
-    req.headers.get('x-admin-key') ??
-    new URL(req.url).searchParams.get('key') ??
-    undefined
-
-  const room = getRoom(params.id)
-  if (!room) {
-    return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
-  }
-  if (!adminKey || adminKey !== room.adminKey) {
-    return NextResponse.json({ error: '管理キーが不正です' }, { status: 403 })
-  }
-
-  let body: ControlAction
   try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'リクエストが不正です' }, { status: 400 })
+    const body = await request.json()
+    const { adminKey, action, ...payload } = body
+
+    const room = getRoom(params.id)
+    if (!room) {
+      return NextResponse.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    // adminKey チェック
+    if (room.adminKey !== adminKey) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const channelName = `room-${params.id}`
+
+    switch (action) {
+      // ====================
+      // 問題変更
+      // ====================
+      case 'setQuestion': {
+        const { questionId, mode } = payload
+        if (!questionId) {
+          return NextResponse.json(
+            { error: 'questionId is required' },
+            { status: 400 }
+          )
+        }
+
+        room.currentQuestionId = questionId
+        room.mode = mode || room.mode
+        room.showAnswer = false
+        room.showExplanation = false
+        room.status = 'active'
+        updateRoom(params.id, room)
+
+        // 生徒に通知
+        await pusherServer.trigger(channelName, 'question-change', {
+          questionId,
+          mode: room.mode,
+        })
+
+        return NextResponse.json({ success: true })
+      }
+
+      // ====================
+      // 正答・解説表示
+      // ====================
+      case 'showAnswer': {
+        const { showAnswer, showExplanation } = payload
+
+        room.showAnswer = showAnswer ?? room.showAnswer
+        room.showExplanation = showExplanation ?? room.showExplanation
+        updateRoom(params.id, room)
+
+        // 生徒に通知
+        await pusherServer.trigger(channelName, 'show-answer', {
+          showAnswer: room.showAnswer,
+          showExplanation: room.showExplanation,
+          questionId: room.currentQuestionId,
+        })
+
+        return NextResponse.json({ success: true })
+      }
+
+      // ====================
+      // モード変更（問題変更を伴わない）
+      // ====================
+      case 'setMode': {
+        const { mode } = payload
+        if (!['choice', 'typing', 'sorting'].includes(mode)) {
+          return NextResponse.json(
+            { error: 'Invalid mode' },
+            { status: 400 }
+          )
+        }
+
+        room.mode = mode
+        updateRoom(params.id, room)
+
+        // 現在の問題があれば生徒に再通知
+        if (room.currentQuestionId) {
+          await pusherServer.trigger(channelName, 'question-change', {
+            questionId: room.currentQuestionId,
+            mode: room.mode,
+          })
+        }
+
+        return NextResponse.json({ success: true })
+      }
+
+      // ====================
+      // 授業終了
+      // ====================
+      case 'finish': {
+        room.status = 'finished'
+        updateRoom(params.id, room)
+
+        await pusherServer.trigger(channelName, 'room-finished', {
+          message: '授業が終了しました',
+        })
+
+        return NextResponse.json({ success: true })
+      }
+
+      default:
+        return NextResponse.json(
+          { error: `Unknown action: ${action}` },
+          { status: 400 }
+        )
+    }
+  } catch (error) {
+    console.error('Control API error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
   }
-
-  switch (body.action) {
-    case 'set-question': {
-      const mode = body.mode && isValidMode(body.mode) ? body.mode : room.mode
-      const updated = updateRoom(params.id, {
-        currentQuestionId: body.questionId,
-        mode,
-        showAnswer: false,
-        showExplanation: false,
-        status: 'active',
-      })
-      if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
-
-      const event: QuestionChangeEvent = {
-        questionId: body.questionId,
-        mode,
-        showAnswer: false,
-        showExplanation: false,
-      }
-      await triggerRoomEvent(params.id, 'question-change', event)
-      return NextResponse.json({ ok: true, room: sanitize(updated) })
-    }
-
-    case 'show-answer': {
-      const updated = updateRoom(params.id, {
-        showAnswer: body.showAnswer,
-        showExplanation: body.showExplanation,
-      })
-      if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
-
-      const event: ShowAnswerEvent = {
-        showAnswer: body.showAnswer,
-        showExplanation: body.showExplanation,
-      }
-      await triggerRoomEvent(params.id, 'show-answer', event)
-      return NextResponse.json({ ok: true, room: sanitize(updated) })
-    }
-
-    case 'set-mode': {
-      if (!isValidMode(body.mode)) {
-        return NextResponse.json({ error: '不正なモードです' }, { status: 400 })
-      }
-      const updated = updateRoom(params.id, { mode: body.mode })
-      if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
-      return NextResponse.json({ ok: true, room: sanitize(updated) })
-    }
-
-    case 'finish-room': {
-      const updated = updateRoom(params.id, { status: 'finished' })
-      if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
-
-      const event: RoomFinishedEvent = { roomId: params.id }
-      await triggerRoomEvent(params.id, 'room-finished', event)
-
-      setTimeout(() => deleteRoom(params.id), 5000)
-      return NextResponse.json({ ok: true })
-    }
-
-    default:
-      return NextResponse.json({ error: '不明なアクションです' }, { status: 400 })
-  }
-}
-
-function sanitize(room: ReturnType<typeof updateRoom>) {
-  if (!room) return null
-  const { adminKey: _adminKey, ...safe } = room
-  return safe
 }

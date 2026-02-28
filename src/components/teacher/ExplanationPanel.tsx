@@ -1,65 +1,86 @@
 'use client'
 
-import type { Question } from '@/types'
+import { Question } from '@/types'
 
 interface ExplanationPanelProps {
   question: Question | null
   showAnswer: boolean
   showExplanation: boolean
+  mode: 'choice' | 'typing' | 'sorting'
 }
 
 export default function ExplanationPanel({
   question,
   showAnswer,
   showExplanation,
+  mode,
 }: ExplanationPanelProps) {
-  if (!question) return null
+  if (!question || !showAnswer) return null
+
+  // 正答テキスト
+  const correctText = (() => {
+    if (mode === 'choice' && question.choices) {
+      const c = question.choices.find((c) => c.id === question.correctAnswer)
+      return c ? `${c.id.toUpperCase()}. ${c.text}` : question.correctAnswer
+    }
+    if (mode === 'sorting' && question.sortWords) {
+      return question.sortWords.join(' ')
+    }
+    return question.correctAnswer
+  })()
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="font-bold text-slate-800 text-sm">解説パネル</h2>
-      </div>
-
-      <div className="p-5 space-y-4">
-        {/* 正答 */}
-        <div>
-          <p className="text-xs font-semibold text-slate-500 mb-1.5">正答</p>
-          {showAnswer ? (
-            <div className="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
-              <span className="font-bold text-emerald-700 text-base">{question.correctAnswer}</span>
-            </div>
-          ) : (
-            <div className="px-4 py-2 bg-slate-100 rounded-xl text-slate-400 text-sm">
-              （正答表示OFFです）
-            </div>
-          )}
-        </div>
-
-        {/* ポイント解説 */}
-        <div>
-          <p className="text-xs font-semibold text-slate-500 mb-1.5">ポイント</p>
-          <div className="px-4 py-2 bg-blue-50 border border-blue-100 rounded-xl text-blue-800 text-sm leading-relaxed">
-            {question.explanationShort}
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* 正答 */}
+      <div className="px-5 py-4 bg-emerald-50 border-b border-emerald-100">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+            <svg
+              className="w-4 h-4 text-white"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
           </div>
-        </div>
-
-        {/* 詳細解説 */}
-        {showExplanation && (
           <div>
-            <p className="text-xs font-semibold text-slate-500 mb-1.5">詳細解説</p>
-            <div className="px-4 py-3 bg-amber-50 border border-amber-100 rounded-xl text-amber-900 text-sm leading-relaxed">
-              {question.explanation}
-            </div>
+            <span className="text-[10px] font-medium text-emerald-600 uppercase tracking-wider">
+              正答
+            </span>
+            <p className="text-base font-bold text-emerald-800">
+              {correctText}
+            </p>
           </div>
-        )}
-
-        {/* ヒント */}
-        <div>
-          <p className="text-xs font-semibold text-slate-500 mb-1.5">ヒント</p>
-          <div className="text-slate-500 text-sm italic">{question.hint}</div>
         </div>
       </div>
+
+      {/* 解説 */}
+      {showExplanation && (
+        <div className="px-5 py-4">
+          <div className="mb-3">
+            <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">
+              ポイント
+            </span>
+            <p className="text-sm font-bold text-slate-800 mt-1">
+              {question.explanationShort}
+            </p>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              詳細解説
+            </span>
+            <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+              {question.explanation}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
