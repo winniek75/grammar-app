@@ -42,6 +42,17 @@ export default function StudentRoomPage() {
   const [showWrongAnswerReview, setShowWrongAnswerReview] = useState(false)
   const [wrongAnswers, setWrongAnswers] = useState<WrongAnswerRecord[]>([])
 
+  // Combo milestones, near-miss feedback, adaptive hints
+  const [combo, setCombo] = useState(0)
+  const [maxCombo, setMaxCombo] = useState(0)
+  const [sessionCorrect, setSessionCorrect] = useState(0)
+  const [sessionTotal, setSessionTotal] = useState(0)
+  const [comboMilestone, setComboMilestone] = useState<string | null>(null)
+  const [recentResults, setRecentResults] = useState<boolean[]>([])
+  const [showAdaptiveHint, setShowAdaptiveHint] = useState(false)
+  const comboMilestoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const COMBO_MILESTONES: Record<number, string> = { 3: "NICE! \u2728", 5: "GREAT! \uD83D\uDD25", 7: "AMAZING! \u26A1", 10: "UNSTOPPABLE! \uD83D\uDC8E" }
+
   // Initialize WiseXP SDK
   useEffect(() => {
     if (typeof window !== 'undefined' && window.WiseXP) {
@@ -252,6 +263,33 @@ export default function StudentRoomPage() {
       setHasAnswered(true)
       setMyAnswer(answer)
       setIsCorrect(data.isCorrect)
+      setSessionTotal(prev => prev + 1)
+
+      // Combo & milestone tracking
+      if (data.isCorrect) {
+        const newCombo = combo + 1
+        setCombo(newCombo)
+        setMaxCombo(prev => Math.max(prev, newCombo))
+        setSessionCorrect(prev => prev + 1)
+        if (COMBO_MILESTONES[newCombo]) {
+          setComboMilestone(COMBO_MILESTONES[newCombo])
+          if (comboMilestoneTimer.current) clearTimeout(comboMilestoneTimer.current)
+          comboMilestoneTimer.current = setTimeout(() => setComboMilestone(null), 1500)
+        }
+      } else {
+        setCombo(0)
+      }
+
+      // Adaptive hint: track last 5 results
+      setRecentResults(prev => {
+        const next = [...prev, data.isCorrect].slice(-5)
+        if (next.length >= 5) {
+          const wrongCount = next.filter(r => !r).length
+          if (wrongCount >= 3) setShowAdaptiveHint(true)
+          else if (next.every(r => r)) setShowAdaptiveHint(false)
+        }
+        return next
+      })
 
       // Play sound effect
       if (soundEnabled) {
@@ -381,6 +419,18 @@ export default function StudentRoomPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 p-4">
+      {/* Combo milestone overlay */}
+      {comboMilestone && (
+        <div key={combo} className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none" style={{ animation: 'milestoneAnim 1.5s ease forwards' }}>
+          <div className="text-5xl font-black text-white drop-shadow-lg" style={{ textShadow: '0 0 40px rgba(59,130,246,.6), 0 4px 20px rgba(0,0,0,.5)', animation: 'milestoneTextPop 1.5s cubic-bezier(.34,1.56,.64,1) forwards' }}>
+            {comboMilestone}
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes milestoneAnim { 0%{opacity:0} 10%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+        @keyframes milestoneTextPop { 0%{transform:scale(0) rotate(-10deg);opacity:0} 30%{transform:scale(1.3) rotate(3deg);opacity:1} 50%{transform:scale(1) rotate(0)} 100%{transform:scale(.8) translateY(-30px);opacity:0} }
+      `}</style>
       <div className="max-w-3xl mx-auto">
         {/* ヘッダー */}
         <header className="bg-white rounded-lg shadow-sm p-4 mb-6">
@@ -388,6 +438,11 @@ export default function StudentRoomPage() {
             <div>
               <p className="text-sm text-gray-600">参加者: {participant.name}</p>
               <p className="text-xs text-gray-500">コード: {roomCode}</p>
+              {combo >= 2 && (
+                <p className="text-xs font-bold mt-1" style={{ color: combo >= 7 ? '#ef4444' : combo >= 5 ? '#f59e0b' : '#3b82f6' }}>
+                  {'\uD83D\uDD25'} {combo} combo{combo >= 10 ? ' - MAX!' : ''}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               {room.status === 'waiting' && (
@@ -497,11 +552,19 @@ export default function StudentRoomPage() {
             {/* 問題文 */}
             <h2 className="text-xl font-bold mb-6">{currentQuestion.questionText}</h2>
 
-            {/* ヒント */}
-            {currentQuestion.hint && !room.showAnswer && (
+            {/* ヒント (show always if adaptive hint is active, or if hint exists and answer not shown) */}
+            {currentQuestion.hint && (showAdaptiveHint || !room.showAnswer) && !room.showAnswer && (
               <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p className="text-sm text-yellow-800">
-                  💡 ヒント: {currentQuestion.hint}
+                  {showAdaptiveHint ? '\uD83D\uDCA1 \u30D2\u30F3\u30C8\uFF08\u81EA\u52D5\u8868\u793A\uFF09: ' : '\uD83D\uDCA1 \u30D2\u30F3\u30C8: '}{currentQuestion.hint}
+                </p>
+              </div>
+            )}
+            {/* Adaptive hint: extra grammar tip when struggling */}
+            {showAdaptiveHint && !room.showAnswer && !hasAnswered && (
+              <div className="mb-6 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                <p className="text-sm text-purple-800">
+                  {'\uD83C\uDFAF'} {currentQuestion.category}{'\u306E\u30DD\u30A4\u30F3\u30C8\u3092\u601D\u3044\u51FA\u3057\u3066\u304B\u3089\u7B54\u3048\u3066\u307F\u3088\u3046\uFF01'}
                 </p>
               </div>
             )}
@@ -556,6 +619,14 @@ export default function StudentRoomPage() {
                     <p className={`font-bold ${isCorrect ? 'text-green-800' : 'text-red-800'}`}>
                       {isCorrect ? '✅ 正解！' : '❌ 不正解'}
                     </p>
+                    {/* Near-miss / perfect feedback */}
+                    {sessionTotal > 0 && (() => {
+                      const pct = Math.round((sessionCorrect / sessionTotal) * 100)
+                      const wrongN = sessionTotal - sessionCorrect
+                      if (pct === 100 && sessionTotal >= 3) return <p className="text-sm font-bold text-yellow-600 mt-1">PERFECT! {'\uD83D\uDC8E'} {sessionCorrect}/{sessionTotal}</p>
+                      if (pct >= 80 && pct < 100) return <p className="text-sm text-purple-600 mt-1">{'\u3042\u3068'}{wrongN}{'\u554F\u3067\u30D1\u30FC\u30D5\u30A7\u30AF\u30C8\uFF01'}</p>
+                      return null
+                    })()}
                     {!isCorrect && (
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-sm text-gray-700">
