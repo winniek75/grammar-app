@@ -19,6 +19,8 @@ import {
 } from '@/lib/sounds'
 import type { RoomState, Question, Participant } from '@/lib/types'
 
+declare global { interface Window { WiseXP?: any; } }
+
 export default function StudentRoomPage() {
   const router = useRouter()
   const params = useParams()
@@ -39,6 +41,13 @@ export default function StudentRoomPage() {
   const ttsEnabledRef = useRef(ttsEnabled)
   const [showWrongAnswerReview, setShowWrongAnswerReview] = useState(false)
   const [wrongAnswers, setWrongAnswers] = useState<WrongAnswerRecord[]>([])
+
+  // Initialize WiseXP SDK
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.WiseXP) {
+      window.WiseXP.init('grammar-app');
+    }
+  }, []);
 
   // Load preferences from localStorage
   useEffect(() => {
@@ -263,9 +272,28 @@ export default function StudentRoomPage() {
           correctAnswer: currentQuestion.correctAnswer,
           userAnswer: answer,
         })
+        // Report wrong answer to WiseXP
+        if (window.WiseXP) {
+          window.WiseXP.reportWrong({
+            question: currentQuestion.questionText,
+            correct: currentQuestion.correctAnswer,
+            playerAnswer: answer,
+          });
+        }
       } else if (data.isCorrect && currentQuestion) {
         // If they got it right, remove from wrong answer list
         removeWrongAnswer(currentQuestion.id)
+      }
+
+      // Report answer to WiseXP
+      if (window.WiseXP) {
+        window.WiseXP.reportGame({
+          score: data.isCorrect ? 1 : 0,
+          correct: data.isCorrect ? 1 : 0,
+          total: 1,
+          maxCombo: 0,
+          grade: currentQuestion?.grade ?? 0,
+        });
       }
 
       // Persist answer to localStorage for page reload recovery
