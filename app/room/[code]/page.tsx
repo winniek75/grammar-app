@@ -1,12 +1,22 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { pusherClient, getRoomChannel } from '@/lib/pusher-client'
 import { questions } from '@/app/data/questions'
 import ChoiceQuestion from '@/app/components/questions/ChoiceQuestion'
 import TypingQuestion from '@/app/components/questions/TypingQuestion'
 import SortingQuestion from '@/app/components/questions/SortingQuestion'
+import {
+  playCorrectSound,
+  playWrongSound,
+  speakEnglish,
+  recordWrongAnswer,
+  removeWrongAnswer,
+  getWrongAnswers,
+  clearWrongAnswers,
+  type WrongAnswerRecord,
+} from '@/lib/sounds'
 import type { RoomState, Question, Participant } from '@/lib/types'
 
 export default function StudentRoomPage() {
@@ -24,6 +34,42 @@ export default function StudentRoomPage() {
   const [hasAnswered, setHasAnswered] = useState(false)
   const [myAnswer, setMyAnswer] = useState('')
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const ttsEnabledRef = useRef(ttsEnabled)
+  const [showWrongAnswerReview, setShowWrongAnswerReview] = useState(false)
+  const [wrongAnswers, setWrongAnswers] = useState<WrongAnswerRecord[]>([])
+
+  // Load preferences from localStorage
+  useEffect(() => {
+    try {
+      const savedSound = localStorage.getItem('grammar-app-sound-enabled')
+      if (savedSound !== null) setSoundEnabled(JSON.parse(savedSound))
+      const savedTts = localStorage.getItem('grammar-app-tts-enabled')
+      if (savedTts !== null) setTtsEnabled(JSON.parse(savedTts))
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  // Persist preferences
+  useEffect(() => {
+    try {
+      localStorage.setItem('grammar-app-sound-enabled', JSON.stringify(soundEnabled))
+    } catch { /* ignore */ }
+  }, [soundEnabled])
+
+  useEffect(() => {
+    ttsEnabledRef.current = ttsEnabled
+    try {
+      localStorage.setItem('grammar-app-tts-enabled', JSON.stringify(ttsEnabled))
+    } catch { /* ignore */ }
+  }, [ttsEnabled])
+
+  // Refresh wrong answers list
+  const refreshWrongAnswers = useCallback(() => {
+    setWrongAnswers(getWrongAnswers())
+  }, [])
 
   // ルーム情報を取得
   useEffect(() => {
@@ -84,6 +130,22 @@ export default function StudentRoomPage() {
         showAnswer: data.showAnswer,
         showExplanation: data.showExplanation
       } : null)
+
+      // TTS: read the correct answer in English when answer is revealed
+      if (data.showAnswer && ttsEnabledRef.current) {
+        setCurrentQuestion(prev => {
+          if (prev) {
+            // Build TTS text from correct answer
+            let ttsText = prev.correctAnswer
+            if (prev.questionType === 'choice' && prev.choices) {
+              const choice = prev.choices.find(c => c.id === prev.correctAnswer)
+              if (choice) ttsText = choice.text
+            }
+            speakEnglish(ttsText)
+          }
+          return prev
+        })
+      }
     })
 
     // ルーム終了
@@ -141,6 +203,22 @@ export default function StudentRoomPage() {
     }
   }, [roomCode])
 
+  // Restore answer state from localStorage when question changes
+  useEffect(() => {
+    if (!currentQuestion) return
+    try {
+      const savedAnswers = JSON.parse(localStorage.getItem(`grammar-app-answers-${roomCode}`) || '{}')
+      const savedAnswer = savedAnswers[currentQuestion.id]
+      if (savedAnswer) {
+        setHasAnswered(true)
+        setMyAnswer(savedAnswer.answer)
+        setIsCorrect(savedAnswer.isCorrect)
+      }
+    } catch {
+      // ignore
+    }
+  }, [currentQuestion, roomCode])
+
   // 回答送信
   async function handleSubmitAnswer(answer: string) {
     if (!room || !participant || !currentQuestion || hasAnswered) return
@@ -165,6 +243,43 @@ export default function StudentRoomPage() {
       setHasAnswered(true)
       setMyAnswer(answer)
       setIsCorrect(data.isCorrect)
+
+      // Play sound effect
+      if (soundEnabled) {
+        if (data.isCorrect) {
+          playCorrectSound()
+        } else {
+          playWrongSound()
+        }
+      }
+
+      // Track wrong answers in localStorage
+      if (!data.isCorrect && currentQuestion) {
+        recordWrongAnswer({
+          questionId: currentQuestion.id,
+          questionText: currentQuestion.questionText,
+          category: currentQuestion.category,
+          grade: currentQuestion.grade,
+          correctAnswer: currentQuestion.correctAnswer,
+          userAnswer: answer,
+        })
+      } else if (data.isCorrect && currentQuestion) {
+        // If they got it right, remove from wrong answer list
+        removeWrongAnswer(currentQuestion.id)
+      }
+
+      // Persist answer to localStorage for page reload recovery
+      if (currentQuestion) {
+        try {
+          const savedAnswers = JSON.parse(localStorage.getItem(`grammar-app-answers-${roomCode}`) || '{}')
+          savedAnswers[currentQuestion.id] = {
+            answer,
+            isCorrect: data.isCorrect,
+            timestamp: new Date().toISOString(),
+          }
+          localStorage.setItem(`grammar-app-answers-${roomCode}`, JSON.stringify(savedAnswers))
+        } catch { /* ignore */ }
+      }
     } catch {
       alert('回答の送信に失敗しました')
     }
@@ -246,11 +361,100 @@ export default function StudentRoomPage() {
               <p className="text-sm text-gray-600">参加者: {participant.name}</p>
               <p className="text-xs text-gray-500">コード: {roomCode}</p>
             </div>
-            {room.status === 'waiting' && (
-              <span className="text-sm text-gray-500">待機中...</span>
-            )}
+            <div className="flex items-center gap-3">
+              {room.status === 'waiting' && (
+                <span className="text-sm text-gray-500">待機中...</span>
+              )}
+              {/* Sound toggle */}
+              <button
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className={`text-lg px-2 py-1 rounded transition-colors ${
+                  soundEnabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'
+                }`}
+                title={soundEnabled ? '効果音 ON' : '効果音 OFF'}
+              >
+                {soundEnabled ? '\u{1F50A}' : '\u{1F507}'}
+              </button>
+              {/* TTS toggle */}
+              <button
+                onClick={() => setTtsEnabled(!ttsEnabled)}
+                className={`text-lg px-2 py-1 rounded transition-colors ${
+                  ttsEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
+                }`}
+                title={ttsEnabled ? '読み上げ ON' : '読み上げ OFF'}
+              >
+                {ttsEnabled ? '\u{1F5E3}' : '\u{1F910}'}
+              </button>
+              {/* Wrong answers review */}
+              <button
+                onClick={() => { refreshWrongAnswers(); setShowWrongAnswerReview(!showWrongAnswerReview) }}
+                className="text-sm px-3 py-1 rounded bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors"
+                title="間違えた問題を復習"
+              >
+                復習 ({getWrongAnswers().length})
+              </button>
+            </div>
           </div>
         </header>
+
+        {/* Wrong answers review panel */}
+        {showWrongAnswerReview && (
+          <div className="bg-white rounded-lg shadow-sm p-6 mb-6 border border-orange-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-orange-800">間違えた問題リスト</h3>
+              <div className="flex gap-2">
+                {wrongAnswers.length > 0 && (
+                  <button
+                    onClick={() => { clearWrongAnswers(); refreshWrongAnswers() }}
+                    className="text-xs px-3 py-1 rounded bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                  >
+                    全て削除
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowWrongAnswerReview(false)}
+                  className="text-xs px-3 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+            {wrongAnswers.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center py-4">
+                間違えた問題はまだありません。
+              </p>
+            ) : (
+              <div className="space-y-3 max-h-80 overflow-y-auto">
+                {wrongAnswers.map((wa) => (
+                  <div key={wa.questionId} className="p-3 bg-orange-50 rounded-lg border border-orange-100">
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-xs text-orange-600 font-medium">
+                        {wa.category} - 中{wa.grade}
+                        {wa.count > 1 && (
+                          <span className="ml-2 bg-red-200 text-red-700 px-1.5 py-0.5 rounded-full text-[10px]">
+                            {wa.count}回間違い
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        onClick={() => speakEnglish(wa.correctAnswer)}
+                        className="text-xs text-blue-500 hover:text-blue-700"
+                        title="正答を読み上げ"
+                      >
+                        {'\u{1F50A}'}
+                      </button>
+                    </div>
+                    <p className="text-sm font-medium text-gray-800 mb-1">{wa.questionText}</p>
+                    <div className="flex gap-4 text-xs">
+                      <span className="text-red-600">あなたの回答: {wa.userAnswer}</span>
+                      <span className="text-green-600 font-bold">正答: {wa.correctAnswer}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 問題表示エリア */}
         {currentQuestion ? (
@@ -325,9 +529,25 @@ export default function StudentRoomPage() {
                       {isCorrect ? '✅ 正解！' : '❌ 不正解'}
                     </p>
                     {!isCorrect && (
-                      <p className="text-sm mt-1 text-gray-700">
-                        正答: {currentQuestion.correctAnswer}
-                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-sm text-gray-700">
+                          正答: {currentQuestion.correctAnswer}
+                        </p>
+                        <button
+                          onClick={() => {
+                            let ttsText = currentQuestion.correctAnswer
+                            if (currentQuestion.questionType === 'choice' && currentQuestion.choices) {
+                              const choice = currentQuestion.choices.find(c => c.id === currentQuestion.correctAnswer)
+                              if (choice) ttsText = choice.text
+                            }
+                            speakEnglish(ttsText)
+                          }}
+                          className="text-xs text-blue-500 hover:text-blue-700"
+                          title="正答を読み上げ"
+                        >
+                          {'\u{1F50A}'}
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
