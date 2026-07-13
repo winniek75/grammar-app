@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: { code: string } }
 ) {
   const code = params.code.trim().toUpperCase()
-  const room = getRoomByCode(code)
+  const room = await getRoomByCode(code)
 
   if (!room) {
     return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })

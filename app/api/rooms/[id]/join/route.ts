@@ -10,7 +10,7 @@ export async function POST(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  const room = getRoom(params.id)
+  const room = await getRoom(params.id)
   if (!room) {
     return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
   }
@@ -44,7 +44,7 @@ export async function POST(
     joinedAt: now,
   }
 
-  const updated = addParticipant(params.id, participant)
+  const updated = await addParticipant(params.id, participant)
   if (!updated) {
     return NextResponse.json({ error: '参加者の追加に失敗しました' }, { status: 500 })
   }

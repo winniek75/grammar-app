@@ -8,7 +8,7 @@ export async function GET(
   _req: Request,
   { params }: { params: { id: string } }
 ) {
-  const room = getRoom(params.id)
+  const room = await getRoom(params.id)
   if (!room) {
     return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
   }

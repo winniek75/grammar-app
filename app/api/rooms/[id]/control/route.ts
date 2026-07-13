@@ -25,7 +25,7 @@ export async function POST(
     ?? new URL(req.url).searchParams.get('key')
     ?? undefined
 
-  const room = getRoom(params.id)
+  const room = await getRoom(params.id)
   if (!room) {
     return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
   }
@@ -45,7 +45,7 @@ export async function POST(
     // 問題を切り替える
     case 'set-question': {
       const mode = body.mode && isValidMode(body.mode) ? body.mode : room.mode
-      const updated = updateRoom(params.id, {
+      const updated = await updateRoom(params.id, {
         currentQuestionId: body.questionId,
         mode,
         showAnswer: false,
@@ -66,7 +66,7 @@ export async function POST(
 
     // 正答・解説の表示/非表示
     case 'show-answer': {
-      const updated = updateRoom(params.id, {
+      const updated = await updateRoom(params.id, {
         showAnswer: body.showAnswer,
         showExplanation: body.showExplanation,
       })
@@ -85,21 +85,21 @@ export async function POST(
       if (!isValidMode(body.mode)) {
         return NextResponse.json({ error: '不正なモードです' }, { status: 400 })
       }
-      const updated = updateRoom(params.id, { mode: body.mode })
+      const updated = await updateRoom(params.id, { mode: body.mode })
       if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
       return NextResponse.json({ ok: true, room: sanitize(updated) })
     }
 
     // ルーム終了
     case 'finish-room': {
-      const updated = updateRoom(params.id, { status: 'finished' })
+      const updated = await updateRoom(params.id, { status: 'finished' })
       if (!updated) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
 
       const event: RoomFinishedEvent = { roomId: params.id }
       await triggerRoomEvent(params.id, 'room-finished', event as unknown as Record<string, unknown>)
 
       // 少し待ってからメモリから削除
-      setTimeout(() => deleteRoom(params.id), 5000)
+      setTimeout(() => { void deleteRoom(params.id) }, 5000)
 
       return NextResponse.json({ ok: true })
     }
@@ -110,7 +110,7 @@ export async function POST(
 }
 
 // adminKey を除いた安全なルーム情報を返す
-function sanitize(room: ReturnType<typeof updateRoom>) {
+function sanitize(room: Awaited<ReturnType<typeof updateRoom>>) {
   if (!room) return null
   const { adminKey: _adminKey, ...safe } = room
   return safe

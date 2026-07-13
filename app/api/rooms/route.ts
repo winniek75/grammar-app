@@ -15,7 +15,7 @@ export async function POST() {
     // ルームコードの衝突を避けるため最大10回リトライ
     let code = generateRoomCode()
     for (let i = 0; i < 10; i++) {
-      if (!getRoomByCode(code)) break
+      if (!await getRoomByCode(code)) break
       code = generateRoomCode()
     }
 
@@ -36,7 +36,7 @@ export async function POST() {
       createdAt: new Date(),
     }
 
-    createRoom(room)
+    await createRoom(room)
 
     const response: CreateRoomResponse = {
       roomId,
