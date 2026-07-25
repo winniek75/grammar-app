@@ -19,7 +19,15 @@ import {
 } from '@/lib/sounds'
 import type { RoomState, Question, Participant } from '@/lib/types'
 
-declare global { interface Window { WiseXP?: any; } }
+declare global { interface Window { WiseXP?: any; WiseGame?: any; } }
+
+// B2 tag mapping: category → tag ID
+const CATEGORY_TAG_MAP: Record<string, string> = {
+  'be動詞': 'be_verb', '一般動詞': 'general_verb', '三単現': 'third_person_s',
+  '複数形': 'plural_s', '代名詞': 'pronoun', '冠詞': 'article',
+  '前置詞': 'preposition', '助動詞': 'auxiliary', '比較': 'comparative',
+  '命令文': 'imperative', 'There is': 'there_is',
+}
 
 export default function StudentRoomPage() {
   const router = useRouter()
@@ -37,6 +45,8 @@ export default function StudentRoomPage() {
   const [myAnswer, setMyAnswer] = useState('')
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const sessionWrongRef = useRef<Array<{q:string;correct:string;chosen:string;tag:string}>>([])
+  const sessionStatsRef = useRef({ correct: 0, total: 0 })
   const [ttsEnabled, setTtsEnabled] = useState(true)
   const ttsEnabledRef = useRef(ttsEnabled)
   const [showWrongAnswerReview, setShowWrongAnswerReview] = useState(false)
@@ -59,6 +69,26 @@ export default function StudentRoomPage() {
       window.WiseXP.init('grammar-app');
     }
   }, []);
+
+  // B2: Send session wrongAnswers to MoWISE on page leave
+  useEffect(() => {
+    const sendReport = () => {
+      const s = sessionStatsRef.current
+      if (s.total === 0) return
+      const acc = Math.round((s.correct / s.total) * 100)
+      try {
+        window.WiseGame?.reportComplete?.({
+          score: acc, maxScore: 100, accuracy: acc,
+          metadata: { wrongAnswers: sessionWrongRef.current }
+        })
+      } catch { /* ignore */ }
+    }
+    window.addEventListener('beforeunload', sendReport)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') sendReport()
+    })
+    return () => window.removeEventListener('beforeunload', sendReport)
+  }, [])
 
   // Load preferences from localStorage
   useEffect(() => {
@@ -310,6 +340,13 @@ export default function StudentRoomPage() {
           correctAnswer: currentQuestion.correctAnswer,
           userAnswer: answer,
         })
+        // B2: track wrong answer for MoWISE analysis
+        const catTag = CATEGORY_TAG_MAP[currentQuestion.category ?? ''] || 'other_grammar'
+        sessionWrongRef.current.push({
+          q: currentQuestion.questionText, correct: currentQuestion.correctAnswer,
+          chosen: answer, tag: catTag,
+        })
+        if (sessionWrongRef.current.length > 20) sessionWrongRef.current = sessionWrongRef.current.slice(-20)
         // Report wrong answer to WiseXP
         if (window.WiseXP) {
           window.WiseXP.reportWrong({
@@ -322,6 +359,10 @@ export default function StudentRoomPage() {
         // If they got it right, remove from wrong answer list
         removeWrongAnswer(currentQuestion.id)
       }
+
+      // Track session stats
+      sessionStatsRef.current.total++
+      if (data.isCorrect) sessionStatsRef.current.correct++
 
       // Report answer to WiseXP
       if (window.WiseXP) {
