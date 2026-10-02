@@ -6,8 +6,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: '中学英文法 総復習アプリ',
-  description: 'オンラインレッスン向けリアルタイム英文法問題演習アプリ',
+  title: '先生と英文法レッスン（授業用）',
+  description: '先生がえらんだ中学英文法の問題に、生徒が同時に答える授業用ツール（先生の進行が必要です）',
 }
 
 export default function RootLayout({

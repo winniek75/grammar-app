@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CreateRoomResponse } from '@/lib/types'
 
@@ -37,6 +37,14 @@ export default function HomePage() {
   const [joinError, setJoinError] = useState('')
   const [joining, setJoining] = useState(false)
 
+  // ディープリンク: /?room=ABC123 で入室コードを入力済みにする
+  useEffect(() => {
+    const param = new URLSearchParams(window.location.search).get('room')
+    if (!param) return
+    const fromLink = param.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+    if (fromLink) setCode(fromLink)
+  }, [])
+
   async function handleJoinRoom(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = code.trim().toUpperCase()
@@ -67,8 +75,12 @@ export default function HomePage() {
 
         {/* タイトル */}
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">🇬🇧 英文法 総復習</h1>
-          <p className="mt-2 text-gray-500">中学英語 オンラインレッスン</p>
+          <h1 className="text-3xl font-bold text-gray-900">🇬🇧 先生と英文法レッスン</h1>
+          <p className="mt-2 text-gray-500">授業用 ・ 中学英文法（中1〜中3）</p>
+          <p className="mt-3 text-sm text-gray-600 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-left">
+            先生がえらんだ問題に、みんなで同時に答える<strong>授業用ツール</strong>です。
+            先生が問題を出すまで、問題は表示されません（ひとりで自習するアプリではありません）。
+          </p>
         </div>
 
         {/* 講師：ルーム作成 */}
@@ -79,6 +91,7 @@ export default function HomePage() {
             <>
               <p className="text-sm text-gray-600 mb-4">
                 ルームを作成して講師URLと生徒の入室コードを発行します。
+                講師画面で問題をえらぶと、入室した生徒の画面に同じ問題が出ます。
               </p>
               <button
                 onClick={handleCreateRoom}
@@ -107,6 +120,19 @@ export default function HomePage() {
                     {createdRoom.studentCode}
                   </span>
                   <CopyButton text={createdRoom.studentCode} />
+                </div>
+              </div>
+
+              {/* 生徒用リンク */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  生徒用リンク（開くとコードが入力済みになります）
+                </label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-gray-100 rounded px-2 py-1 break-all">
+                    {studentLink(createdRoom.studentCode)}
+                  </code>
+                  <CopyButton text={studentLink(createdRoom.studentCode)} />
                 </div>
               </div>
 
@@ -140,7 +166,10 @@ export default function HomePage() {
 
         {/* 生徒：入室コード入力 */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">🎒 生徒の方</h2>
+          <h2 className="text-lg font-semibold text-gray-800 mb-1">🎒 生徒の方</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            先生から聞いた入室コードを入れてください。
+          </p>
           <form onSubmit={handleJoinRoom} className="space-y-3">
             <div>
               <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-1">
@@ -167,9 +196,23 @@ export default function HomePage() {
           </form>
         </div>
 
+        <p className="text-center">
+          <a
+            href="https://wise-english-portal.vercel.app"
+            className="text-sm text-gray-500 hover:text-gray-700 underline"
+          >
+            🏠 学習ホームにもどる
+          </a>
+        </p>
+
       </div>
     </main>
   )
+}
+
+function studentLink(code: string): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}/?room=${code}`
 }
 
 // ── コピーボタン ──────────────────────────────

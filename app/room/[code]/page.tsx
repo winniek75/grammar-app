@@ -17,16 +17,26 @@ import {
   clearWrongAnswers,
   type WrongAnswerRecord,
 } from '@/lib/sounds'
-import type { RoomState, Question, Participant } from '@/lib/types'
+import type { RoomStateResponse, Question, Participant } from '@/lib/types'
 
 declare global { interface Window { WiseXP?: any; WiseGame?: any; } }
 
 // B2 tag mapping: category → tag ID
 const CATEGORY_TAG_MAP: Record<string, string> = {
+  '命令文・感嘆文': 'imperative', '複数形・冠詞': 'plural_s',
   'be動詞': 'be_verb', '一般動詞': 'general_verb', '三単現': 'third_person_s',
   '複数形': 'plural_s', '代名詞': 'pronoun', '冠詞': 'article',
   '前置詞': 'preposition', '助動詞': 'auxiliary', '比較': 'comparative',
   '命令文': 'imperative', 'There is': 'there_is',
+}
+
+// 記録・表示用：選択問題は記号（a/b/c/d）ではなく選択肢の英文にする
+function answerLabel(q: Question, value: string): string {
+  if (q.questionType === 'choice' && q.choices) {
+    const choice = q.choices.find(c => c.id === value)
+    if (choice) return choice.text
+  }
+  return value
 }
 
 export default function StudentRoomPage() {
@@ -34,7 +44,7 @@ export default function StudentRoomPage() {
   const params = useParams()
   const roomCode = (params.code as string).toUpperCase()
 
-  const [room, setRoom] = useState<RoomState | null>(null)
+  const [room, setRoom] = useState<RoomStateResponse | null>(null)
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
   const [participant, setParticipant] = useState<Participant | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,6 +57,10 @@ export default function StudentRoomPage() {
   const [soundEnabled, setSoundEnabled] = useState(true)
   const sessionWrongRef = useRef<Array<{q:string;correct:string;chosen:string;tag:string}>>([])
   const sessionStatsRef = useRef({ correct: 0, total: 0 })
+  const lastReportedTotalRef = useRef(0)
+  const currentQuestionIdRef = useRef<string | null>(null)
+  const prevShowAnswerRef = useRef<boolean | null>(null)
+  const finishedRef = useRef(false)
   const [ttsEnabled, setTtsEnabled] = useState(true)
   const ttsEnabledRef = useRef(ttsEnabled)
   const [showWrongAnswerReview, setShowWrongAnswerReview] = useState(false)
@@ -74,7 +88,9 @@ export default function StudentRoomPage() {
   useEffect(() => {
     const sendReport = () => {
       const s = sessionStatsRef.current
-      if (s.total === 0) return
+      // 新しい回答が無ければ送らない（画面を切り替えるたびに同じ結果を重複送信しない）
+      if (s.total === 0 || s.total === lastReportedTotalRef.current) return
+      lastReportedTotalRef.current = s.total
       const acc = Math.round((s.correct / s.total) * 100)
       try {
         window.WiseGame?.reportComplete?.({
@@ -83,11 +99,15 @@ export default function StudentRoomPage() {
         })
       } catch { /* ignore */ }
     }
-    window.addEventListener('beforeunload', sendReport)
-    document.addEventListener('visibilitychange', () => {
+    const onVisibility = () => {
       if (document.visibilityState === 'hidden') sendReport()
-    })
-    return () => window.removeEventListener('beforeunload', sendReport)
+    }
+    window.addEventListener('beforeunload', sendReport)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('beforeunload', sendReport)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [])
 
   // Load preferences from localStorage
@@ -121,53 +141,85 @@ export default function StudentRoomPage() {
     setWrongAnswers(getWrongAnswers())
   }, [])
 
+  // 出題中の問題を画面に反映（問題が変わったときだけ回答状態をリセット）
+  const syncQuestion = useCallback((questionId: string | null) => {
+    if (currentQuestionIdRef.current === questionId) return
+    currentQuestionIdRef.current = questionId
+    setCurrentQuestion(questionId ? questions.find(q => q.id === questionId) || null : null)
+    setHasAnswered(false)
+    setMyAnswer('')
+    setIsCorrect(null)
+  }, [])
+
+  const handleFinished = useCallback(() => {
+    if (finishedRef.current) return
+    finishedRef.current = true
+    alert('授業が終了しました')
+    router.push('/')
+  }, [router])
+
   // ルーム情報を取得
-  useEffect(() => {
-    async function fetchRoom() {
-      try {
-        const res = await fetch(`/api/rooms/code/${roomCode}`)
-        if (!res.ok) {
-          if (res.status === 404) {
-            setError('ルームが見つかりません。コードを確認してください。')
-          } else {
-            setError('エラーが発生しました')
-          }
+  const fetchRoom = useCallback(async (initial: boolean) => {
+    try {
+      const res = await fetch(`/api/rooms/code/${roomCode}`, { cache: 'no-store' })
+      if (!res.ok) {
+        if (!initial) {
+          if (res.status === 410 || res.status === 404) handleFinished()
           return
         }
-        const data: RoomState = await res.json()
-        setRoom(data)
-
-        // 現在の問題を設定
-        if (data.currentQuestionId) {
-          const q = questions.find(q => q.id === data.currentQuestionId)
-          setCurrentQuestion(q || null)
+        if (res.status === 404) {
+          setError('ルームが見つかりません。コードを確認してください。')
+        } else if (res.status === 410) {
+          setError('この授業は終了しました。')
+        } else {
+          setError('エラーが発生しました')
         }
-      } catch {
-        setError('ルームの取得に失敗しました')
-      } finally {
-        setLoading(false)
+        return
       }
+      const data: RoomStateResponse = await res.json()
+      setRoom(data)
+      syncQuestion(data.currentQuestionId)
+    } catch {
+      if (initial) setError('ルームの取得に失敗しました')
+    } finally {
+      if (initial) setLoading(false)
     }
-    fetchRoom()
-  }, [roomCode])
+  }, [roomCode, syncQuestion, handleFinished])
+
+  useEffect(() => {
+    fetchRoom(true)
+  }, [fetchRoom])
+
+  // 通知が届かなかった場合に備えて、数秒ごとに最新の状態を取り直す
+  const roomId = room?.id ?? null
+  const joined = participant !== null
+  useEffect(() => {
+    if (!roomId || !joined) return
+    const timer = setInterval(() => fetchRoom(false), 5000)
+    return () => clearInterval(timer)
+  }, [roomId, joined, fetchRoom])
 
   // Pusher接続
   useEffect(() => {
-    if (!room || !participant) return
+    if (!roomId || !joined || !pusherClient) return
 
-    const channel = pusherClient.subscribe(getRoomChannel(room.id))
+    const channelName = getRoomChannel(roomId)
+    const channel = pusherClient.subscribe(channelName)
 
     // 問題が変更された
     channel.bind('question-change', (data: {
       questionId: string
       mode: 'choice' | 'typing' | 'sorting'
     }) => {
-      const q = questions.find(q => q.id === data.questionId)
-      setCurrentQuestion(q || null)
-      setHasAnswered(false)
-      setMyAnswer('')
-      setIsCorrect(null)
-      setRoom(prev => prev ? { ...prev, currentQuestionId: data.questionId, mode: data.mode } : null)
+      syncQuestion(data.questionId)
+      setRoom(prev => prev ? {
+        ...prev,
+        currentQuestionId: data.questionId,
+        mode: data.mode,
+        showAnswer: false,
+        showExplanation: false,
+        status: 'active',
+      } : null)
     })
 
     // 正答・解説の表示
@@ -180,35 +232,27 @@ export default function StudentRoomPage() {
         showAnswer: data.showAnswer,
         showExplanation: data.showExplanation
       } : null)
-
-      // TTS: read the correct answer in English when answer is revealed
-      if (data.showAnswer && ttsEnabledRef.current) {
-        setCurrentQuestion(prev => {
-          if (prev) {
-            // Build TTS text from correct answer
-            let ttsText = prev.correctAnswer
-            if (prev.questionType === 'choice' && prev.choices) {
-              const choice = prev.choices.find(c => c.id === prev.correctAnswer)
-              if (choice) ttsText = choice.text
-            }
-            speakEnglish(ttsText)
-          }
-          return prev
-        })
-      }
     })
 
     // ルーム終了
-    channel.bind('room-finished', () => {
-      alert('授業が終了しました')
-      router.push('/')
-    })
+    channel.bind('room-finished', handleFinished)
 
     return () => {
       channel.unbind_all()
-      channel.unsubscribe()
+      pusherClient?.unsubscribe(channelName)
     }
-  }, [room, participant, router])
+  }, [roomId, joined, syncQuestion, handleFinished])
+
+  // TTS: 正答が表示された瞬間に、正答の英語を読み上げる
+  const showAnswerNow = room?.showAnswer ?? null
+  useEffect(() => {
+    if (showAnswerNow === null) return
+    const prev = prevShowAnswerRef.current
+    prevShowAnswerRef.current = showAnswerNow
+    if (prev === false && showAnswerNow && ttsEnabledRef.current && currentQuestion) {
+      speakEnglish(answerLabel(currentQuestion, currentQuestion.correctAnswer))
+    }
+  }, [showAnswerNow, currentQuestion])
 
   // 入室処理
   async function handleJoin(e: React.FormEvent) {
@@ -228,7 +272,11 @@ export default function StudentRoomPage() {
         return
       }
 
-      const data: { participant: Participant } = await res.json()
+      const data: { participant?: Participant } = await res.json()
+      if (!data.participant?.id || !data.participant.sessionId) {
+        alert('入室に失敗しました')
+        return
+      }
       setParticipant(data.participant)
 
       // ローカルストレージに保存
@@ -245,8 +293,9 @@ export default function StudentRoomPage() {
     const saved = localStorage.getItem(`room-${roomCode}-participant`)
     if (saved) {
       try {
-        const p: Participant = JSON.parse(saved)
-        setParticipant(p)
+        const p: Participant | null = JSON.parse(saved)
+        // 本人確認用の sessionId が無い古い保存データは使わない
+        if (p && p.id && p.sessionId) setParticipant(p)
       } catch {
         // 無視
       }
@@ -271,7 +320,7 @@ export default function StudentRoomPage() {
 
   // 回答送信
   async function handleSubmitAnswer(answer: string) {
-    if (!room || !participant || !currentQuestion || hasAnswered) return
+    if (!room || !participant || !currentQuestion || hasAnswered || room.showAnswer) return
 
     try {
       const res = await fetch(`/api/rooms/${room.id}/answer`, {
@@ -279,13 +328,33 @@ export default function StudentRoomPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           participantId: participant.id,
+          sessionId: participant.sessionId,
           questionId: currentQuestion.id,
           answerText: answer
         })
       })
 
       if (!res.ok) {
-        alert('回答の送信に失敗しました')
+        const err: { code?: string; isCorrect?: boolean; answerText?: string } =
+          await res.json().catch(() => ({}))
+        if (res.status === 403 && err.code === 'not-participant') {
+          // このルームの参加者として確認できない → 入室し直してもらう
+          try { localStorage.removeItem(`room-${roomCode}-participant`) } catch { /* ignore */ }
+          setParticipant(null)
+          alert('入室の情報が確認できませんでした。もう一度名前を入れて入室してください。')
+        } else if (err.code === 'already-answered') {
+          // すでに回答済み（別のタブなど）→ 記録されている回答を表示する。学習記録には二重に数えない
+          setHasAnswered(true)
+          setMyAnswer(err.answerText ?? answer)
+          setIsCorrect(err.isCorrect ?? null)
+        } else if (err.code === 'closed' || err.code === 'not-current') {
+          fetchRoom(false)
+          alert('この問題の回答受付は終わりました。')
+        } else if (res.status === 410) {
+          handleFinished()
+        } else {
+          alert('回答の送信に失敗しました')
+        }
         return
       }
 
@@ -337,22 +406,23 @@ export default function StudentRoomPage() {
           questionText: currentQuestion.questionText,
           category: currentQuestion.category,
           grade: currentQuestion.grade,
-          correctAnswer: currentQuestion.correctAnswer,
-          userAnswer: answer,
+          correctAnswer: answerLabel(currentQuestion, currentQuestion.correctAnswer),
+          userAnswer: answerLabel(currentQuestion, answer),
         })
         // B2: track wrong answer for MoWISE analysis
         const catTag = CATEGORY_TAG_MAP[currentQuestion.category ?? ''] || 'other_grammar'
         sessionWrongRef.current.push({
-          q: currentQuestion.questionText, correct: currentQuestion.correctAnswer,
-          chosen: answer, tag: catTag,
+          q: currentQuestion.questionText,
+          correct: answerLabel(currentQuestion, currentQuestion.correctAnswer),
+          chosen: answerLabel(currentQuestion, answer), tag: catTag,
         })
         if (sessionWrongRef.current.length > 20) sessionWrongRef.current = sessionWrongRef.current.slice(-20)
         // Report wrong answer to WiseXP
         if (window.WiseXP) {
           window.WiseXP.reportWrong({
             question: currentQuestion.questionText,
-            correct: currentQuestion.correctAnswer,
-            playerAnswer: answer,
+            correct: answerLabel(currentQuestion, currentQuestion.correctAnswer),
+            playerAnswer: answerLabel(currentQuestion, answer),
           });
         }
       } else if (data.isCorrect && currentQuestion) {
@@ -422,7 +492,8 @@ export default function StudentRoomPage() {
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="card">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">授業に参加</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">先生と英文法レッスン</h1>
+            <p className="text-sm text-gray-600 mb-3">授業に参加します。先生が出した問題に答えましょう。</p>
             <p className="text-gray-600 mb-6">
               ルームコード: <span className="font-mono font-bold">{roomCode}</span>
             </p>
@@ -439,6 +510,7 @@ export default function StudentRoomPage() {
                   onChange={(e) => setStudentName(e.target.value)}
                   placeholder="例: 田中太郎"
                   className="input-field"
+                  maxLength={20}
                   required
                   autoFocus
                 />
@@ -611,32 +683,34 @@ export default function StudentRoomPage() {
             )}
 
             {/* 問題形式に応じたコンポーネント */}
-            {room.mode === 'choice' && currentQuestion.choices && (
+            {currentQuestion.questionType === 'choice' && currentQuestion.choices && (
               <ChoiceQuestion
                 choices={currentQuestion.choices}
                 selected={myAnswer}
                 correct={room.showAnswer ? currentQuestion.correctAnswer : null}
-                disabled={hasAnswered}
+                disabled={hasAnswered || room.showAnswer}
                 onSelect={handleSubmitAnswer}
               />
             )}
 
-            {room.mode === 'typing' && (
+            {currentQuestion.questionType === 'typing' && (
               <TypingQuestion
-                value={hasAnswered ? myAnswer : ''}
+                key={currentQuestion.id}
+                value={myAnswer}
                 correct={room.showAnswer ? currentQuestion.correctAnswer : null}
-                submitted={hasAnswered}
+                submitted={hasAnswered || room.showAnswer}
                 isCorrect={isCorrect}
                 onChange={(v) => !hasAnswered && setMyAnswer(v)}
                 onSubmit={() => !hasAnswered && handleSubmitAnswer(myAnswer)}
               />
             )}
 
-            {room.mode === 'sorting' && currentQuestion.sortWords && (
+            {currentQuestion.questionType === 'sorting' && currentQuestion.sortWords && (
               <SortingQuestion
+                key={currentQuestion.id}
                 words={currentQuestion.sortWords}
                 correct={room.showAnswer ? currentQuestion.correctAnswer : null}
-                submitted={hasAnswered}
+                submitted={hasAnswered || room.showAnswer}
                 isCorrect={isCorrect}
                 onSubmit={(answer) => !hasAnswered && handleSubmitAnswer(answer)}
               />
@@ -652,6 +726,11 @@ export default function StudentRoomPage() {
             {/* 正答・解説表示 */}
             {room.showAnswer && (
               <div className="mt-6 space-y-4">
+                {!hasAnswered && (
+                  <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
+                    <p className="text-gray-700">この問題は未回答でした。正答をたしかめよう。</p>
+                  </div>
+                )}
                 {/* 正誤表示 */}
                 {hasAnswered && (
                   <div className={`p-4 rounded-lg ${
@@ -671,17 +750,10 @@ export default function StudentRoomPage() {
                     {!isCorrect && (
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-sm text-gray-700">
-                          正答: {currentQuestion.correctAnswer}
+                          正答: {answerLabel(currentQuestion, currentQuestion.correctAnswer)}
                         </p>
                         <button
-                          onClick={() => {
-                            let ttsText = currentQuestion.correctAnswer
-                            if (currentQuestion.questionType === 'choice' && currentQuestion.choices) {
-                              const choice = currentQuestion.choices.find(c => c.id === currentQuestion.correctAnswer)
-                              if (choice) ttsText = choice.text
-                            }
-                            speakEnglish(ttsText)
-                          }}
+                          onClick={() => speakEnglish(answerLabel(currentQuestion, currentQuestion.correctAnswer))}
                           className="text-xs text-blue-500 hover:text-blue-700"
                           title="正答を読み上げ"
                         >
@@ -706,7 +778,8 @@ export default function StudentRoomPage() {
           </div>
         ) : (
           <div className="bg-white rounded-lg shadow-sm p-12 text-center">
-            <p className="text-gray-500">先生が問題を選択するのを待っています...</p>
+            <p className="text-gray-500">先生が問題を出すのを待っています...</p>
+            <p className="text-xs text-gray-400 mt-2">このままの画面で待っていてね。</p>
           </div>
         )}
       </div>

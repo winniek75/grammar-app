@@ -10,6 +10,19 @@ interface Props {
   onSubmit: (answer: string) => void
 }
 
+function shuffleWords(words: string[]): string[] {
+  if (words.length < 2) return [...words]
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const out = [...words]
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[out[i], out[j]] = [out[j], out[i]]
+    }
+    if (out.some((w, i) => w !== words[i])) return out
+  }
+  return [...words].reverse()
+}
+
 export default function SortingQuestion({
   words,
   correct,
@@ -18,7 +31,8 @@ export default function SortingQuestion({
   onSubmit,
 }: Props) {
   const [arranged, setArranged] = useState<string[]>([])
-  const [remaining, setRemaining] = useState<string[]>([...words])
+  // 単語は正しい順で登録されているので、まぜてから出す
+  const [remaining, setRemaining] = useState<string[]>(() => shuffleWords(words))
   const dragItem = useRef<{ word: string; from: 'arranged' | 'remaining'; index: number } | null>(null)
 
   function addWord(word: string, index: number) {
@@ -88,9 +102,9 @@ export default function SortingQuestion({
         {arranged.map((word, i) => {
           let style = 'bg-indigo-500 text-white cursor-grab active:cursor-grabbing'
           if (submitted && correct !== null) {
-            const correctWords = correct.split(' ')
+            // words は正しい順で渡される
             style =
-              correctWords[i] === word
+              words[i] === word
                 ? 'bg-green-500 text-white cursor-default'
                 : 'bg-red-400 text-white cursor-default'
           }
