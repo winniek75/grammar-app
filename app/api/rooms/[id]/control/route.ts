@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getRoom, updateRoom, deleteRoom } from '@/lib/room-store'
-import { isValidMode } from '@/lib/utils'
+import { isValidMode, getAdminKeyFromRequest, toTeacherView } from '@/lib/utils'
+import { questions } from '@/app/data/questions'
 import { triggerRoomEvent } from '@/lib/pusher'
 import type {
   QuestionChangeEvent,
@@ -20,31 +21,36 @@ export async function POST(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  // ── adminKey 認証 ────────────────────────────
-  const adminKey = req.headers.get('x-admin-key')
-    ?? new URL(req.url).searchParams.get('key')
-    ?? undefined
-
   const room = await getRoom(params.id)
   if (!room) {
     return NextResponse.json({ error: 'ルームが見つかりません' }, { status: 404 })
   }
-  if (!adminKey || adminKey !== room.adminKey) {
-    return NextResponse.json({ error: '管理キーが不正です' }, { status: 403 })
-  }
 
   // ── リクエストボディ ──────────────────────────
-  let body: ControlAction
+  let body: ControlAction & { adminKey?: unknown }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'リクエストが不正です' }, { status: 400 })
   }
 
+  // ── adminKey 認証（ヘッダー / クエリ / ボディのどれでも可）──
+  const adminKey = getAdminKeyFromRequest(req)
+    ?? (typeof body.adminKey === 'string' ? body.adminKey : undefined)
+  if (!adminKey || adminKey !== room.adminKey) {
+    return NextResponse.json({ error: '管理キーが不正です' }, { status: 403 })
+  }
+
   switch (body.action) {
     // 問題を切り替える
     case 'set-question': {
-      const mode = body.mode && isValidMode(body.mode) ? body.mode : room.mode
+      const questionId = body.questionId
+      const question = questions.find((q) => q.id === questionId)
+      if (!question) {
+        return NextResponse.json({ error: '問題が見つかりません' }, { status: 404 })
+      }
+      // 出題形式は問題データに合わせる（採点も問題データの形式で行うため）
+      const mode = question.questionType
       const updated = await updateRoom(params.id, {
         currentQuestionId: body.questionId,
         mode,
@@ -109,9 +115,8 @@ export async function POST(
   }
 }
 
-// adminKey を除いた安全なルーム情報を返す
+// adminKey と参加者の sessionId を除いた安全なルーム情報を返す
 function sanitize(room: Awaited<ReturnType<typeof updateRoom>>) {
   if (!room) return null
-  const { adminKey: _adminKey, ...safe } = room
-  return safe
+  return toTeacherView(room)
 }

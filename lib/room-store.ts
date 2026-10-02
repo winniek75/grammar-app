@@ -10,7 +10,7 @@
 //   SUPABASE_URL              (例: https://xxxx.supabase.co)
 //   SUPABASE_SERVICE_ROLE_KEY (server-only。クライアントに露出させないこと)
 //
-// 必要なマイグレーション: migrations/20260710_grammar_rooms.sql
+// 必要なテーブル定義: docs/supabase-grammar-rooms.sql
 // ─────────────────────────────────────────────
 import type { RoomState, Participant, Answer } from '@/lib/types'
 
@@ -128,23 +128,95 @@ export async function updateRoom(
   return rows[0] ? toState(rows[0]) : null
 }
 
+// ── 参加者・回答の追加 ────────────────────────
+// participants / answers は1行のJSON列なので、「読む→足す→書く」だと、全員が同時に
+// 答えたときに後から書いた人が前の人の分を上書きして消してしまう。
+//  1) docs/supabase-grammar-rooms.sql のSQL関数があれば、それでDB側で1回の更新として追加する（確実）
+//  2) 関数が無ければ、書いたあとに読み直して確認し、消えていたらやり直す（ほぼ防げるが完全ではない）
+const WRITE_RETRIES = 5
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** SQL関数で追加する。関数が未作成(404)などで使えないときは undefined を返す */
+async function appendViaRpc(
+  fn: 'grammar_room_add_participant' | 'grammar_room_add_answer',
+  args: Record<string, unknown>
+): Promise<RoomState | null | undefined> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify(args),
+    })
+    if (!res.ok) return undefined
+    const data = (await res.json()) as RoomRow[] | RoomRow | null
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row || !row.id) return null
+    return toState(row)
+  } catch {
+    return undefined
+  }
+}
+
+/** 読み直して確認しながら追加する（SQL関数が無いときの代替） */
+async function appendWithVerify(
+  roomId: string,
+  isPresent: (room: RoomState) => boolean,
+  buildUpdate: (room: RoomState) => Partial<RoomState>
+): Promise<RoomState | null> {
+  for (let attempt = 0; attempt < WRITE_RETRIES; attempt++) {
+    const room = await getRoom(roomId)
+    if (!room) return null
+    if (!isPresent(room)) {
+      await updateRoom(roomId, buildUpdate(room))
+    }
+    // 直後と少しあとの2回確認する（同時に書いた人の上書きは少し遅れて起きるため）
+    await sleep(80 + Math.random() * 120)
+    const first = await getRoom(roomId)
+    if (!first) return null
+    if (!isPresent(first)) continue
+    await sleep(250 + Math.random() * 150)
+    const second = await getRoom(roomId)
+    if (!second) return null
+    if (isPresent(second)) return second
+  }
+  return null
+}
+
 export async function addParticipant(
   roomId: string,
   participant: Participant
 ): Promise<RoomState | null> {
-  const room = await getRoom(roomId)
-  if (!room) return null
-  return updateRoom(roomId, { participants: [...room.participants, participant] })
+  const viaRpc = await appendViaRpc('grammar_room_add_participant', {
+    p_room_id: roomId,
+    p_participant: participant,
+  })
+  if (viaRpc !== undefined) return viaRpc
+  return appendWithVerify(
+    roomId,
+    (room) => room.participants.some((p) => p.id === participant.id),
+    (room) => ({ participants: [...room.participants, participant] })
+  )
 }
 
 export async function addAnswer(roomId: string, answer: Answer): Promise<RoomState | null> {
-  const room = await getRoom(roomId)
-  if (!room) return null
-  // 同じ参加者・同じ問題の回答は上書き
-  const filtered = room.answers.filter(
-    (a) => !(a.participantId === answer.participantId && a.questionId === answer.questionId)
+  const viaRpc = await appendViaRpc('grammar_room_add_answer', {
+    p_room_id: roomId,
+    p_answer: answer,
+  })
+  if (viaRpc !== undefined) return viaRpc
+  return appendWithVerify(
+    roomId,
+    (room) => room.answers.some((a) => a.id === answer.id),
+    // 同じ参加者・同じ問題の回答は上書き
+    (room) => ({
+      answers: [
+        ...room.answers.filter(
+          (a) => !(a.participantId === answer.participantId && a.questionId === answer.questionId)
+        ),
+        answer,
+      ],
+    })
   )
-  return updateRoom(roomId, { answers: [...filtered, answer] })
 }
 
 export async function deleteRoom(roomId: string): Promise<boolean> {

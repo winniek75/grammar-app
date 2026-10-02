@@ -34,7 +34,16 @@ export function getPusherClient(): PusherJS {
 }
 
 // エクスポート用のクライアント（互換性のため）
-export const pusherClient = typeof window !== 'undefined' ? getPusherClient() : null!
+// 設定が無い場合は null（画面は定期的な再取得だけで動く）
+export const pusherClient: PusherJS | null = (() => {
+  if (typeof window === 'undefined') return null
+  try {
+    return getPusherClient()
+  } catch (error) {
+    console.warn('[pusher] リアルタイム通知を開始できませんでした', error)
+    return null
+  }
+})()
 
 // チャンネル名ヘルパー
 export function getRoomChannel(roomId: string): string {

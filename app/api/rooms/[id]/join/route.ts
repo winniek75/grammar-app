@@ -4,6 +4,8 @@ import { generateParticipantId } from '@/lib/utils'
 import { triggerRoomEvent } from '@/lib/pusher'
 import type { Participant, JoinRoomResponse, ParticipantJoinedEvent } from '@/lib/types'
 
+const MAX_PARTICIPANTS = 100
+
 export const runtime = 'nodejs'
 
 export async function POST(
@@ -18,14 +20,14 @@ export async function POST(
     return NextResponse.json({ error: 'このルームは終了しています' }, { status: 410 })
   }
 
-  let body: { name?: string; sessionId?: string }
+  let body: { name?: unknown }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'リクエストが不正です' }, { status: 400 })
   }
 
-  const name = body.name?.trim()
+  const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name || name.length === 0) {
     return NextResponse.json({ error: '名前を入力してください' }, { status: 400 })
   }
@@ -33,8 +35,13 @@ export async function POST(
     return NextResponse.json({ error: '名前は20文字以内で入力してください' }, { status: 400 })
   }
 
+  if (room.participants.length >= MAX_PARTICIPANTS) {
+    return NextResponse.json({ error: 'このルームは満員です' }, { status: 409 })
+  }
+
   const participantId = generateParticipantId()
-  const sessionId = body.sessionId ?? generateParticipantId()
+  // sessionId は必ずサーバで発行し、入室した本人にだけ返す（回答時の本人確認に使う）
+  const sessionId = generateParticipantId()
   const now = new Date()
 
   const participant: Participant = {
@@ -58,6 +65,7 @@ export async function POST(
   await triggerRoomEvent(params.id, 'participant-joined', event as unknown as Record<string, unknown>)
 
   const response: JoinRoomResponse = {
+    participant,
     participantId,
     sessionId,
     roomId: room.id,
