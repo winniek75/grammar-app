@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react'
 
-import type { Participant, Answer } from '@/lib/types'
+import type { PublicParticipant, Answer } from '@/lib/types'
 
 interface StudentAnswersProps {
-  participants: Participant[]
+  participants: PublicParticipant[]
   answers: Answer[]
   showAnswer: boolean
 }
@@ -216,7 +216,7 @@ export default function StudentAnswers({
                     <span className="flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                       <span className="text-[10px] text-amber-500 font-medium">
-                        回答中
+                        未回答
                       </span>
                     </span>
                   ) : showAnswer ? (

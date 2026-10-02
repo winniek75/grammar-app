@@ -75,7 +75,12 @@ export async function triggerRoomEvent(
   event: string,
   data: Record<string, unknown>
 ): Promise<void> {
-  // 実行時にのみPusherを使用
-  const server = getPusherServer()
-  await server.trigger(getRoomChannel(roomId), event, data)
+  // 実行時にのみPusherを使用。
+  // 通知の失敗でAPI全体を失敗にしない（データは保存済みで、画面側は定期的に再取得する）
+  try {
+    const server = getPusherServer()
+    await server.trigger(getRoomChannel(roomId), event, data)
+  } catch (error) {
+    console.error(`[pusher] ${event} の送信に失敗しました`, error)
+  }
 }

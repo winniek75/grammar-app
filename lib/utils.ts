@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { Question } from '@/lib/types'
+import type { Question, RoomState, TeacherRoomView } from '@/lib/types'
 
 // ─────────────────────────────────────────────
 // ID / コード生成
@@ -62,14 +62,42 @@ export function checkAnswer(
       )
 
     case 'sorting':
-      return (
-        answerText.trim().toLowerCase().replace(/\s+/g, ' ') ===
-        correct.trim().toLowerCase().replace(/\s+/g, ' ')
-      )
+      // 並べ替えは単語を空白でつないで送られるので、句読点の前の空白を無視して比べる
+      // （例: "Clean the classroom ." と "Clean the classroom." は同じ）
+      return normalizeSentence(answerText) === normalizeSentence(correct)
 
     default:
       return false
   }
+}
+
+function normalizeSentence(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,!?])/g, '$1')
+}
+
+// ─────────────────────────────────────────────
+// 講師画面向けのルーム情報（秘密の値を除く）
+// ─────────────────────────────────────────────
+
+export function toTeacherView(room: RoomState): TeacherRoomView {
+  const { adminKey: _adminKey, participants, ...rest } = room
+  return {
+    ...rest,
+    participants: participants.map(({ sessionId: _sessionId, ...p }) => p),
+  }
+}
+
+/** リクエストから講師の管理キーを取り出す（ヘッダー → クエリ の順） */
+export function getAdminKeyFromRequest(req: Request): string | undefined {
+  return (
+    req.headers.get('x-admin-key') ??
+    new URL(req.url).searchParams.get('key') ??
+    undefined
+  )
 }
 
 // ─────────────────────────────────────────────

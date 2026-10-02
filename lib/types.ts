@@ -28,8 +28,17 @@ export interface Question {
 export interface Participant {
   id: string
   name: string
+  /** 入室した本人だけが知る合言葉。回答送信時の本人確認に使う。講師画面や Pusher には流さない */
   sessionId: string
   joinedAt: Date
+}
+
+/** sessionId を除いた参加者情報（講師画面・イベント用） */
+export type PublicParticipant = Omit<Participant, 'sessionId'>
+
+/** 講師画面に返すルーム情報（adminKey と参加者の sessionId を除く） */
+export type TeacherRoomView = Omit<RoomState, 'adminKey' | 'participants'> & {
+  participants: PublicParticipant[]
 }
 
 export interface Answer {
@@ -72,12 +81,10 @@ export interface ShowAnswerEvent {
   showExplanation: boolean
 }
 
+// 公開チャンネルに流れるので、回答内容・正誤は載せない（講師画面は通知を受けて再取得する）
 export interface AnswerSubmittedEvent {
   participantId: string
-  participantName: string
   questionId: string
-  answerText: string
-  isCorrect: boolean
   answeredAt: string
 }
 
@@ -112,6 +119,7 @@ export interface CreateRoomResponse {
 }
 
 export interface JoinRoomResponse {
+  participant: Participant
   participantId: string
   sessionId: string
   roomId: string
