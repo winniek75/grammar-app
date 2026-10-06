@@ -1,10 +1,9 @@
 // ─────────────────────────────────────────────
-// room-store.ts — Supabase 永続化版 (v2, 2026-07-10)
+// room-store.ts — Supabase + メモリ フォールバック版 (v3)
 //
-// 旧実装はグローバル変数(メモリ)保存だったため、Vercel の
-// サーバーレス環境ではインスタンス間で共有されず、
-// コールドスタートで授業中のルームが消失する問題があった。
-// 本実装は Supabase の grammar_rooms テーブルに永続化する。
+// Supabase が利用可能ならそちらに永続化する。
+// 環境変数が未設定または Supabase に到達できない場合は
+// メモリストアにフォールバックして動作し続ける。
 //
 // 必要な環境変数:
 //   SUPABASE_URL              (例: https://xxxx.supabase.co)
@@ -14,15 +13,40 @@
 // ─────────────────────────────────────────────
 import type { RoomState, Participant, Answer } from '@/lib/types'
 
-const SUPABASE_URL = process.env.SUPABASE_URL!
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const TABLE = `${SUPABASE_URL}/rest/v1/grammar_rooms`
+// ── Supabase が使えるか判定 ──────────────────
+const SUPABASE_URL = process.env.SUPABASE_URL || ''
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const useSupabase = !!(SUPABASE_URL && SERVICE_KEY)
 
-const HEADERS = {
-  apikey: SERVICE_KEY,
-  Authorization: `Bearer ${SERVICE_KEY}`,
-  'Content-Type': 'application/json',
-  Prefer: 'return=representation',
+const TABLE = useSupabase ? `${SUPABASE_URL}/rest/v1/grammar_rooms` : ''
+const HEADERS: Record<string, string> = useSupabase
+  ? {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    }
+  : {}
+
+// ── メモリストア（フォールバック用） ─────────
+declare global {
+  // eslint-disable-next-line no-var
+  var __grammarRooms: Map<string, RoomState> | undefined
+}
+function mem(): Map<string, RoomState> {
+  if (!global.__grammarRooms) global.__grammarRooms = new Map()
+  return global.__grammarRooms
+}
+
+// ── Supabase fetch（5秒タイムアウト付き） ────
+async function sbFetch(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 // ── row <-> RoomState 変換 ──────────────────
@@ -86,46 +110,82 @@ function updatesToRow(u: Partial<RoomState>): Record<string, unknown> {
 
 // ── CRUD ─────────────────────────────────────
 export async function createRoom(room: RoomState): Promise<RoomState> {
-  const res = await fetch(TABLE, {
-    method: 'POST',
-    headers: HEADERS,
-    body: JSON.stringify(toRow(room)),
-  })
-  if (!res.ok) throw new Error(`createRoom failed: ${res.status} ${await res.text()}`)
-  const [row] = (await res.json()) as RoomRow[]
-  return toState(row)
+  if (useSupabase) {
+    try {
+      const res = await sbFetch(TABLE, {
+        method: 'POST',
+        headers: HEADERS,
+        body: JSON.stringify(toRow(room)),
+      })
+      if (res.ok) {
+        const [row] = (await res.json()) as RoomRow[]
+        return toState(row)
+      }
+      console.warn('[room-store] Supabase createRoom failed:', res.status)
+    } catch (e) {
+      console.warn('[room-store] Supabase unreachable, using memory:', e)
+    }
+  }
+  mem().set(room.id, { ...room })
+  return room
 }
 
 export async function getRoom(roomId: string): Promise<RoomState | undefined> {
-  const res = await fetch(`${TABLE}?id=eq.${encodeURIComponent(roomId)}&limit=1`, {
-    headers: HEADERS, cache: 'no-store',
-  })
-  if (!res.ok) return undefined
-  const rows = (await res.json()) as RoomRow[]
-  return rows[0] ? toState(rows[0]) : undefined
+  if (useSupabase) {
+    try {
+      const res = await sbFetch(`${TABLE}?id=eq.${encodeURIComponent(roomId)}&limit=1`, {
+        headers: HEADERS, cache: 'no-store',
+      })
+      if (res.ok) {
+        const rows = (await res.json()) as RoomRow[]
+        if (rows[0]) return toState(rows[0])
+      }
+    } catch { /* fall through to memory */ }
+  }
+  return mem().get(roomId)
 }
 
 export async function getRoomByCode(code: string): Promise<RoomState | undefined> {
-  const res = await fetch(`${TABLE}?code=eq.${encodeURIComponent(code)}&limit=1`, {
-    headers: HEADERS, cache: 'no-store',
-  })
-  if (!res.ok) return undefined
-  const rows = (await res.json()) as RoomRow[]
-  return rows[0] ? toState(rows[0]) : undefined
+  if (useSupabase) {
+    try {
+      const res = await sbFetch(`${TABLE}?code=eq.${encodeURIComponent(code)}&limit=1`, {
+        headers: HEADERS, cache: 'no-store',
+      })
+      if (res.ok) {
+        const rows = (await res.json()) as RoomRow[]
+        if (rows[0]) return toState(rows[0])
+      }
+    } catch { /* fall through to memory */ }
+  }
+  for (const room of mem().values()) {
+    if (room.code === code) return room
+  }
+  return undefined
 }
 
 export async function updateRoom(
   roomId: string,
   updates: Partial<RoomState>
 ): Promise<RoomState | null> {
-  const res = await fetch(`${TABLE}?id=eq.${encodeURIComponent(roomId)}`, {
-    method: 'PATCH',
-    headers: HEADERS,
-    body: JSON.stringify(updatesToRow(updates)),
-  })
-  if (!res.ok) return null
-  const rows = (await res.json()) as RoomRow[]
-  return rows[0] ? toState(rows[0]) : null
+  if (useSupabase) {
+    try {
+      const res = await sbFetch(`${TABLE}?id=eq.${encodeURIComponent(roomId)}`, {
+        method: 'PATCH',
+        headers: HEADERS,
+        body: JSON.stringify(updatesToRow(updates)),
+      })
+      if (res.ok) {
+        const rows = (await res.json()) as RoomRow[]
+        if (rows[0]) return toState(rows[0])
+      }
+    } catch { /* fall through to memory */ }
+  }
+  const store = mem()
+  const existing = store.get(roomId)
+  if (!existing) return null
+  const updated = { ...existing, ...updates }
+  store.set(roomId, updated)
+  return updated
 }
 
 // ── 参加者・回答の追加 ────────────────────────
@@ -141,8 +201,9 @@ async function appendViaRpc(
   fn: 'grammar_room_add_participant' | 'grammar_room_add_answer',
   args: Record<string, unknown>
 ): Promise<RoomState | null | undefined> {
+  if (!useSupabase) return undefined
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    const res = await sbFetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
       method: 'POST',
       headers: HEADERS,
       body: JSON.stringify(args),
@@ -157,7 +218,7 @@ async function appendViaRpc(
   }
 }
 
-/** 読み直して確認しながら追加する（SQL関数が無いときの代替） */
+/** 読み直して確認しながら追加する（SQL関数が無いとき・メモリモードの代替） */
 async function appendWithVerify(
   roomId: string,
   isPresent: (room: RoomState) => boolean,
@@ -169,7 +230,6 @@ async function appendWithVerify(
     if (!isPresent(room)) {
       await updateRoom(roomId, buildUpdate(room))
     }
-    // 直後と少しあとの2回確認する（同時に書いた人の上書きは少し遅れて起きるため）
     await sleep(80 + Math.random() * 120)
     const first = await getRoom(roomId)
     if (!first) return null
@@ -207,7 +267,6 @@ export async function addAnswer(roomId: string, answer: Answer): Promise<RoomSta
   return appendWithVerify(
     roomId,
     (room) => room.answers.some((a) => a.id === answer.id),
-    // 同じ参加者・同じ問題の回答は上書き
     (room) => ({
       answers: [
         ...room.answers.filter(
@@ -220,24 +279,40 @@ export async function addAnswer(roomId: string, answer: Answer): Promise<RoomSta
 }
 
 export async function deleteRoom(roomId: string): Promise<boolean> {
-  const res = await fetch(`${TABLE}?id=eq.${encodeURIComponent(roomId)}`, {
-    method: 'DELETE',
-    headers: HEADERS,
-  })
-  return res.ok
+  mem().delete(roomId)
+  if (useSupabase) {
+    try {
+      const res = await sbFetch(`${TABLE}?id=eq.${encodeURIComponent(roomId)}`, {
+        method: 'DELETE',
+        headers: HEADERS,
+      })
+      return res.ok
+    } catch { return true }
+  }
+  return true
 }
 
 export async function getAllRooms(): Promise<RoomState[]> {
-  const res = await fetch(TABLE, { headers: HEADERS, cache: 'no-store' })
-  if (!res.ok) return []
-  return ((await res.json()) as RoomRow[]).map(toState)
+  if (useSupabase) {
+    try {
+      const res = await sbFetch(TABLE, { headers: HEADERS, cache: 'no-store' })
+      if (res.ok) return ((await res.json()) as RoomRow[]).map(toState)
+    } catch { /* fall through */ }
+  }
+  return [...mem().values()]
 }
 
-// 古いルームを掃除(3時間以上経過したものを削除。授業をまたいでも安全な余裕を確保)
 export async function cleanupOldRooms(maxAgeMs = 3 * 60 * 60 * 1000): Promise<void> {
-  const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
-  await fetch(`${TABLE}?created_at=lt.${encodeURIComponent(cutoff)}`, {
-    method: 'DELETE',
-    headers: HEADERS,
-  })
+  const cutoff = Date.now() - maxAgeMs
+  if (useSupabase) {
+    try {
+      await sbFetch(`${TABLE}?created_at=lt.${encodeURIComponent(new Date(cutoff).toISOString())}`, {
+        method: 'DELETE',
+        headers: HEADERS,
+      })
+    } catch { /* ignore */ }
+  }
+  for (const [id, room] of mem()) {
+    if (room.createdAt.getTime() < cutoff) mem().delete(id)
+  }
 }
